@@ -57,11 +57,16 @@ def load_base_model(device, use_quantization=False):
     return tokenizer, model
 
 
-def generate_text(model, tokenizer, prompt, device, max_new_tokens=150):
+def generate_text(model, tokenizer, prompt, device, max_new_tokens=512, stream=True):
     """Generate text from a prompt using the Qwen chat template."""
+    from transformers import TextStreamer
+    import sys
+
     messages = [{"role": "user", "content": prompt}]
     text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     inputs = tokenizer(text, return_tensors="pt").to(device)
+
+    streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True) if stream else None
 
     with torch.no_grad():
         output_tokens = model.generate(
@@ -71,7 +76,16 @@ def generate_text(model, tokenizer, prompt, device, max_new_tokens=150):
             temperature=0.7,
             top_p=0.9,
             do_sample=True,
+            streamer=streamer,
         )
 
     new_tokens = output_tokens[0][inputs["input_ids"].shape[1]:]
-    return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+    result = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+
+    if len(new_tokens) >= max_new_tokens:
+        print("\n... (reached token limit, truncated)")
+
+    if not stream:
+        print(result)
+
+    return result

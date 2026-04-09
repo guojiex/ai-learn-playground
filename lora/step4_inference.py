@@ -39,13 +39,11 @@ def main():
         print("\n🔴 Before（通用模型 — 无 LoRA）:")
         print("-" * 50)
         with tuned_model.disable_adapter():
-            before = generate_text(tuned_model, tokenizer, prompt, device)
-        print(before)
+            generate_text(tuned_model, tokenizer, prompt, device)
 
         print("\n🟢 After（微调后 — 挂载 LoRA 适配器）:")
         print("-" * 50)
-        after = generate_text(tuned_model, tokenizer, prompt, device)
-        print(after)
+        generate_text(tuned_model, tokenizer, prompt, device)
 
     print(f"\n{'=' * 60}")
     print("💡 关键观察:")

@@ -25,9 +25,9 @@ def main():
     for i, prompt in enumerate(DEMO_PROMPTS, 1):
         print(f"\n--- Prompt {i} ---")
         print(f"📝 {prompt}\n")
-        result = generate_text(model, tokenizer, prompt, device)
-        print(f"🤖 模型输出:\n{result}")
-        print("-" * 50)
+        print("🤖 模型输出:")
+        generate_text(model, tokenizer, prompt, device)
+        print("\n" + "-" * 50)
 
     print('\n\u26a0\ufe0f  \u89c2\u5bdf\uff1a\u901a\u7528\u6a21\u578b\u7684\u56de\u590d\u662f\u5426\u6709\u201c\u7ffb\u8bd1\u8154\u201d\uff1f\u662f\u5426\u7f3a\u5c11\u672c\u5730\u7535\u5546\u9ed1\u8bdd\uff1f')
 
