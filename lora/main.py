@@ -1,73 +1,57 @@
-import torch
-import os
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from peft import LoraConfig, get_peft_model, TaskType
+"""LoRA 微调实战 — 主入口脚本。
+
+串联所有演示步骤，也可单独运行每个 step 脚本。
+
+Usage:
+    python main.py           # 运行全部步骤
+    python main.py 1         # 只运行 step1 (baseline)
+    python main.py 2         # 只运行 step2 (LoRA inject)
+    python main.py 3         # 只运行 step3 (training)
+    python main.py 4         # 只运行 step4 (before/after)
+"""
+
+import sys
+
+import step1_baseline
+import step2_lora_inject
+import step3_train
+import step4_inference
+
+STEPS = {
+    "1": ("Baseline — 通用模型表现", step1_baseline.main),
+    "2": ("LoRA 注入 — 参数效率展示", step2_lora_inject.main),
+    "3": ("微调训练 — 业务数据注入", step3_train.main),
+    "4": ("推理对比 — Before vs After", step4_inference.main),
+}
+
+
+def run_step(key):
+    name, func = STEPS[key]
+    print(f"\n{'#' * 60}")
+    print(f"# 🚀 正在运行 Step {key}: {name}")
+    print(f"{'#' * 60}\n")
+    func()
+
 
 def main():
-    # 1. 基础配置
-    model_id = "Qwen/Qwen1.5-1.8B-Chat" # 适合演示的轻量级模型
-    
-    # 检测设备：M1 Pro 优先使用 mps (Metal Performance Shaders)
-    if torch.backends.mps.is_available():
-        device = torch.device("mps")
-        print("🍏 检测到 Apple Silicon，使用 MPS 加速")
+    if len(sys.argv) > 1:
+        key = sys.argv[1]
+        if key in STEPS:
+            run_step(key)
+        else:
+            print(f"❌ 未知步骤: {key}")
+            print(f"   可用步骤: {', '.join(STEPS.keys())}")
+            sys.exit(1)
     else:
-        device = torch.device("cpu")
-        print("💻 未检测到 GPU 加速，使用 CPU")
+        print("=" * 60)
+        print("  LoRA 微调实战 — 全流程演示")
+        print('  \u4f4e\u6210\u672c\u6253\u9020\u201c\u61c2\u884c\u201d\u7684 AI\uff1a\u4e1c\u5357\u4e9a\u7535\u5546\u63a8\u5ba2\u573a\u666f')
+        print("=" * 60)
+        for key in sorted(STEPS.keys()):
+            run_step(key)
 
-    # 2. 加载分词器和模型
-    print(f"📦 正在加载模型: {model_id}...")
-    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-    
-    # 在 Mac 上，我们使用 float16 来兼顾速度和显存
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id,
-        dtype=torch.bfloat16,
-        low_cpu_mem_usage=True,
-        trust_remote_code=True
-    ).to(device)
+    print("\n🎉 全部演示完成！")
 
-    # 3. 定义 LoRA 配置 (针对东南亚电商推客场景)
-    print("🛠️ 正在注入 LoRA 适配器 (微调贴纸)...")
-    peft_config = LoraConfig(
-        task_type=TaskType.CAUSAL_LM,
-        inference_mode=False, 
-        r=16,                # 秩：决定了微调的参数量
-        lora_alpha=32,       # 缩放系数
-        lora_dropout=0.1,
-        # 针对 Qwen 模型的注意力机制层进行微调
-        target_modules=["q_proj", "v_proj", "k_proj", "o_proj"] 
-    )
-
-    # 4. 包装模型
-    model = get_peft_model(model, peft_config)
-    
-    # 展示核心卖点：可训练参数占比
-    model.print_trainable_parameters()
-
-    # 5. 模拟推理演示：生成东南亚电商文案
-    print("\n✨ 正在模拟推客文案生成...")
-    # 模拟一个印尼市场的种草场景
-    prompt = "你是印尼 TikTok 顶级推客。请用本地黑话安利这款充电宝: Powerbank 20000mAh, 100k IDR."
-    
-    # 构造 Prompt 模板 (针对 Qwen)
-    inputs = tokenizer(f"<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n", return_tensors="pt").to(device)
-
-    # 生成预测
-    with torch.no_grad():
-        output_tokens = model.generate(
-            **inputs,
-            max_new_tokens=150,
-            temperature=0.7,
-            top_p=0.9
-        )
-
-    # 解码并打印结果
-    result = tokenizer.decode(output_tokens[0], skip_special_tokens=True)
-    print("-" * 50)
-    print(f"生成的文案内容:\n\n{result.split('assistant')[-1].strip()}")
-    print("-" * 50)
-    print("\n✅ 演示运行成功！")
 
 if __name__ == "__main__":
     main()

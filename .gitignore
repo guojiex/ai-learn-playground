@@ -32,3 +32,5 @@ go.work.sum
 # .vscode/
 
 venv/
+__pycache__
+.DS_Store

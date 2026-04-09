@@ -20,21 +20,17 @@ echo "📦 正在安装依赖..."
 uv pip install -r requirements.txt -i https://pypi.org/simple
 
 echo "📦 正在精准同步 M1 适配环境..."
-# 1. 先安装最新稳定版的 torch 及其配套组件
 uv pip install "torch>=2.4" "torchvision" "torchaudio"
-
-# 2. 安装其余依赖，并强制约束 numpy 版本
 uv pip install -r requirements.txt "numpy<2" "huggingface_hub"
 
 # 🔑 权限检查
 if [ -z "$HF_TOKEN" ]; then
     echo "⚠️ 警告: 未检测到 HF_TOKEN 环境变量。"
-    echo "如果稍后出现 401 错误，请先执行: export HF_TOKEN=你的转发Token"
+    echo "如果稍后出现 401 错误，请先执行: export HF_TOKEN=你的Token"
 fi
 
-# 3. 运行程序
+# 3. 运行程序（支持指定步骤）
 echo "🚀 启动演示..."
-# 显式地将 Token 传递给 Python 环境
-HF_TOKEN=$HF_TOKEN python main.py
+HF_TOKEN=$HF_TOKEN python main.py "$@"
 
 deactivate
