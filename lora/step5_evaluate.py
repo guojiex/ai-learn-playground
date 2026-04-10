@@ -175,21 +175,28 @@ def main():
     print(f"\n{'=' * 60}")
     print("\U0001f4cb \u8bc4\u6d4b\u7ed3\u679c\u6c47\u603b")
     print("=" * 60)
-    print(f"\n   {'':30s} {'Before':>10s} {'After':>10s} {'\u63d0\u5347':>10s}")
+    col_lift = "\u63d0\u5347"
+    col_ppl = "\u56f0\u60d1\u5ea6 (Perplexity) \u2193"
+    col_slang = "\u9ed1\u8bdd\u547d\u4e2d\u7387 (Slang Hit) \u2191"
+    print(f"\n   {'':30s} {'Before':>10s} {'After':>10s} {col_lift:>10s}")
     print(f"   {'-' * 62}")
 
-    print(f"   {'\u56f0\u60d1\u5ea6 (Perplexity) \u2193':30s} {ppl_before:>10.2f} {ppl_after:>10.2f} {ppl_drop:>+9.1f}%")
+    print(f"   {col_ppl:30s} {ppl_before:>10.2f} {ppl_after:>10.2f} {ppl_drop:>+9.1f}%")
     slang_lift = (overall_after - overall_before) * 100
-    print(f"   {'\u9ed1\u8bdd\u547d\u4e2d\u7387 (Slang Hit) \u2191':30s} {overall_before:>9.1%} {overall_after:>9.1%} {slang_lift:>+9.1f}pp")
+    print(f"   {col_slang:30s} {overall_before:>9.1%} {overall_after:>9.1%} {slang_lift:>+9.1f}pp")
 
+    col_after_hits = "After \u547d\u4e2d\u8bcd\u6c47"
+    no_hit = "(\u65e0)"
     print(f"\n   \u9010\u9898\u9ed1\u8bdd\u547d\u4e2d\u660e\u7ec6:")
-    print(f"   {'Prompt':>8s} {'Before':>12s} {'After':>12s} {'After \u547d\u4e2d\u8bcd\u6c47'}")
+    print(f"   {'Prompt':>8s} {'Before':>12s} {'After':>12s} {col_after_hits}")
     print(f"   {'-' * 62}")
     for rb, ra in zip(results_before, results_after):
-        print(f"   {'#' + str(rb['prompt_idx']):>8s}"
+        idx_str = "#" + str(rb["prompt_idx"])
+        matched_str = ", ".join(ra["matched"][:5]) or no_hit
+        print(f"   {idx_str:>8s}"
               f" {rb['hits']}/{rb['expected']:>10}"
               f" {ra['hits']}/{ra['expected']:>10}"
-              f"   {', '.join(ra['matched'][:5]) or '(\u65e0)'}")
+              f"   {matched_str}")
 
     print(f"\n{'=' * 60}")
     print("\U0001f4a1 \u89e3\u8bfb:")
