@@ -1,11 +1,25 @@
-"""Shared utilities for LoRA fine-tuning demo."""
+"""Shared utilities for LoRA fine-tuning demo.
 
+All paths are configurable via environment variables so the same scripts
+can drive small-data and large-data experiments:
+
+  LORA_DATA_PATH     – training JSONL         (default: data/tw_affiliate.jsonl)
+  LORA_ADAPTER_DIR   – where to save/load adapter (default: output/tw-affiliate-lora)
+  LORA_EVAL_PATH     – evaluation prompts     (default: data/eval_prompts.jsonl)
+  LORA_EXPERIMENT    – label shown in output   (default: "default")
+"""
+
+import os
 import torch
 from pathlib import Path
 
 MODEL_ID = "Qwen/Qwen1.5-1.8B-Chat"
-ADAPTER_DIR = Path(__file__).parent / "output" / "tw-affiliate-lora"
-DATA_PATH = Path(__file__).parent / "data" / "tw_affiliate.jsonl"
+
+_BASE = Path(__file__).parent
+ADAPTER_DIR = Path(os.environ.get("LORA_ADAPTER_DIR", _BASE / "output" / "tw-affiliate-lora"))
+DATA_PATH = Path(os.environ.get("LORA_DATA_PATH", _BASE / "data" / "tw_affiliate.jsonl"))
+EVAL_PROMPTS_PATH = Path(os.environ.get("LORA_EVAL_PATH", _BASE / "data" / "eval_prompts.jsonl"))
+EXPERIMENT_LABEL = os.environ.get("LORA_EXPERIMENT", "default")
 
 DEMO_PROMPTS = [
     "\u4f60\u662f\u53f0\u7063\u8766\u76ae\u9802\u7d1a\u96fb\u5546\u7db2\u7d05\u3002\u8acb\u7528\u53f0\u7063\u53e3\u8a9e\u98a8\u683c\u3001\u7a7f\u63d2\u53f0\u7063\u96fb\u5546\u9ed1\u8a71\uff0c\u5b89\u5229\u9019\u6b3e\u884c\u52d5\u96fb\u6e90: 20000mAh\uff0c\u7279\u50f9 NT$499\u3002",

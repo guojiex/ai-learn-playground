@@ -1,6 +1,6 @@
 #!/bin/bash
-# LoRA 微调实战 — 小数据量实验 (30 条)
-# 输出到 output/tw-affiliate-lora (默认)
+# LoRA 微调实战 — 大数据量实验 (200 条)
+# 输出到 output/tw-affiliate-lora-large
 
 # 1. 确保 uv 已安装
 if ! command -v uv &>/dev/null; then
@@ -31,21 +31,21 @@ if [ -z "$HF_TOKEN" ]; then
     echo "如果稍后出现 401 错误，请先执行: export HF_TOKEN=你的Token"
 fi
 
-# 3. 设置实验参数 — 小数据量 (30 条)
-export LORA_EXPERIMENT="small-30"
-export LORA_DATA_PATH="$(pwd)/data/tw_affiliate.jsonl"
-export LORA_ADAPTER_DIR="$(pwd)/output/tw-affiliate-lora"
-export LORA_EVAL_PATH="$(pwd)/data/eval_prompts.jsonl"
+# 3. 设置实验参数 — 大数据量 (200 条)
+export LORA_EXPERIMENT="large-200"
+export LORA_DATA_PATH="$(pwd)/data/tw_affiliate_large.jsonl"
+export LORA_ADAPTER_DIR="$(pwd)/output/tw-affiliate-lora-large"
+export LORA_EVAL_PATH="$(pwd)/data/eval_prompts_large.jsonl"
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "📊 实验: $LORA_EXPERIMENT"
-echo "📂 训练数据: $LORA_DATA_PATH"
+echo "📂 训练数据: $LORA_DATA_PATH (200 条)"
 echo "💾 适配器输出: $LORA_ADAPTER_DIR"
-echo "📝 评测数据: $LORA_EVAL_PATH"
+echo "📝 评测数据: $LORA_EVAL_PATH (10 prompts)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # 4. 运行程序（支持指定步骤）
-echo "🚀 启动演示..."
+echo "🚀 启动大数据量实验..."
 HF_TOKEN=$HF_TOKEN python main.py "$@"
 
 deactivate

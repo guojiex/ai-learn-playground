@@ -14,10 +14,8 @@ from peft import PeftModel
 
 from utils import (
     detect_device, load_base_model, generate_text,
-    ADAPTER_DIR, DATA_PATH,
+    ADAPTER_DIR, DATA_PATH, EVAL_PROMPTS_PATH, EXPERIMENT_LABEL,
 )
-
-EVAL_PROMPTS_PATH = Path(__file__).parent / "data" / "eval_prompts.jsonl"
 
 COMMON_SLANG = [
     "\u5bf6", "\u5bf6\u5011", "\u5bb6\u4eba\u5011",
