@@ -8,7 +8,7 @@ from utils import detect_device, load_base_model
 
 
 def get_lora_config():
-    """Return the LoRA config tuned for SEA affiliate marketing."""
+    """Return the LoRA config tuned for TW affiliate marketing."""
     return LoraConfig(
         task_type=TaskType.CAUSAL_LM,
         inference_mode=False,

@@ -1,7 +1,7 @@
 """Step 1: Baseline -- show how a generic model struggles with local context.
 
 After running, you'll see that generic models produce overly formal responses,
-lacking local slang and the casual tone expected in SEA affiliate marketing.
+lacking local slang and the casual tone expected in TW affiliate marketing.
 """
 
 from utils import detect_device, load_base_model, generate_text, DEMO_PROMPTS
