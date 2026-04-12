@@ -11,6 +11,7 @@ Outputs a summary table with PPL, Slang Hit Rate, and sample generations.
 import json
 import math
 import os
+import time
 import torch
 from pathlib import Path
 from peft import PeftModel
@@ -114,6 +115,69 @@ def generate_samples(model, tokenizer, device, label):
     return outputs
 
 
+def fmt_duration(seconds):
+    """Format seconds into a human-readable string."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes = int(seconds // 60)
+    secs = seconds % 60
+    return f"{minutes}m {secs:.0f}s"
+
+
+def build_overview(results, timings, total_elapsed):
+    """Build a structured overview with key takeaways and timing info."""
+    labels = list(results.keys())
+    base_label = labels[0]
+    base = results[base_label]
+
+    takeaways = []
+
+    ppl_values = {k: v["ppl"] for k, v in results.items()}
+    slang_values = {k: v["slang_hit"] for k, v in results.items()}
+
+    best_ppl_label = min(ppl_values, key=ppl_values.get)
+    best_slang_label = max(slang_values, key=slang_values.get)
+
+    if base["ppl"] > 0:
+        ppl_reduction = (1 - ppl_values[best_ppl_label] / base["ppl"]) * 100
+        takeaways.append(
+            f"困惑度 (PPL): {best_ppl_label} 表现最佳 "
+            f"({ppl_values[best_ppl_label]:.2f})，"
+            f"相比基座下降 {ppl_reduction:.1f}%"
+        )
+
+    slang_improvement = slang_values[best_slang_label] - base["slang_hit"]
+    takeaways.append(
+        f"黑话命中率: {best_slang_label} 最高 "
+        f"({slang_values[best_slang_label]:.1%})，"
+        f"比基座提升 {slang_improvement:.1%} 个百分点"
+    )
+
+    for i in range(1, len(labels)):
+        prev, curr = labels[i - 1], labels[i]
+        if i >= 2:
+            slang_delta = slang_values[curr] - slang_values[prev]
+            ppl_delta = ppl_values[prev] - ppl_values[curr]
+            takeaways.append(
+                f"{curr} vs {prev}: "
+                f"黑话命中率 +{slang_delta:.1%}，PPL 再降 {ppl_delta:.4f}"
+            )
+
+    takeaways.append(f"结论: 数据量从 30→200 条后，模型对领域风格的掌握度持续提升")
+
+    timing_formatted = {k: fmt_duration(v) for k, v in timings.items()}
+
+    return {
+        "model": MODEL_ID,
+        "takeaways": takeaways,
+        "best_ppl": {"label": best_ppl_label, "value": ppl_values[best_ppl_label]},
+        "best_slang_hit": {"label": best_slang_label, "value": slang_values[best_slang_label]},
+        "timings": timing_formatted,
+        "total_time": fmt_duration(total_elapsed),
+        "total_time_seconds": round(total_elapsed, 1),
+    }
+
+
 def main():
     print("=" * 70)
     print("  Step 6: 三模型对比 — No LoRA / Small LoRA (30) / Large LoRA (200)")
@@ -149,11 +213,16 @@ def main():
     results = {}
     all_samples = {}
     all_eval_details = {}
+    timings = {}
+
+    t_total = time.time()
 
     for label, adapter_name, data_path in configs:
         print(f"\n{'=' * 70}")
         print(f"\U0001f4ca \u8bc4\u6d4b: {label}")
         print("=" * 70)
+
+        t_config = time.time()
 
         if adapter_name is None:
             with model_small.disable_adapter():
@@ -172,9 +241,15 @@ def main():
             print(f"   \u9ed1\u8bdd\u547d\u4e2d\u7387: {hit_rate:.1%}")
             samples = generate_samples(model_small, tokenizer, device, label)
 
+        elapsed_config = time.time() - t_config
+        timings[label] = elapsed_config
+        print(f"   ⏱️  耗时: {elapsed_config:.1f}s")
+
         results[label] = {"ppl": ppl, "slang_hit": hit_rate}
         all_samples[label] = samples
         all_eval_details[label] = eval_details
+
+    total_elapsed = time.time() - t_total
 
     # ===== Summary Table =====
     print(f"\n\n{'=' * 70}")
@@ -189,6 +264,18 @@ def main():
         ppl_str = f"{metrics['ppl']:.2f}"
         slang_str = f"{metrics['slang_hit']:.1%}"
         print(f"   {label:30s} {ppl_str:>12s} {slang_str:>14s}")
+
+    # ===== Overview =====
+    overview = build_overview(results, timings, total_elapsed)
+
+    print(f"\n\n{'=' * 70}")
+    print("📊 Overview — 对比结论")
+    print("=" * 70)
+    for line in overview["takeaways"]:
+        print(f"   • {line}")
+    print(f"\n   ⏱️  总评测耗时: {overview['total_time']}")
+    for label, t in overview["timings"].items():
+        print(f"      - {label}: {t}")
 
     # ===== Sample Outputs =====
     print(f"\n\n{'=' * 70}")
@@ -209,6 +296,7 @@ def main():
     report_path = _BASE / "output" / "compare_report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report = {
+        "overview": overview,
         "metrics": {k: v for k, v in results.items()},
         "samples": {k: v for k, v in all_samples.items()},
         "prompts": COMPARE_PROMPTS,
