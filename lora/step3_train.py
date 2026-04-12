@@ -5,10 +5,17 @@
 
 支持断点续训：每个 epoch 结束后保存 checkpoint，
 下次运行时自动从最近的 checkpoint 恢复。
+
+性能优化:
+  - 动态 padding（按 batch 内最长序列对齐，而非固定 256）
+  - batch_size=4 + gradient_accumulation=4 → 有效 batch=16
+  - MPS/CUDA 自动混合精度
+  - 日志精简（每 10 步打印一次）
 """
 
 import json
 import os
+import time
 import torch
 from pathlib import Path
 from torch.utils.data import Dataset, DataLoader
@@ -20,9 +27,17 @@ from step2_lora_inject import get_lora_config
 
 CHECKPOINT_DIR = ADAPTER_DIR / "checkpoints"
 
+BATCH_SIZE = 4
+GRAD_ACCUM_STEPS = 4
+LOG_EVERY = 10
+
 
 class AffiliateDataset(Dataset):
-    """Simple dataset that tokenizes JSONL instruction-output pairs."""
+    """Simple dataset that tokenizes JSONL instruction-output pairs.
+
+    Does NOT pad here — padding is deferred to the collator so each batch
+    only pads to its own longest sequence instead of a fixed max_length.
+    """
 
     def __init__(self, path, tokenizer, max_length=256):
         self.samples = []
@@ -47,7 +62,6 @@ class AffiliateDataset(Dataset):
                     text,
                     truncation=True,
                     max_length=max_length,
-                    padding="max_length",
                     return_tensors="pt",
                 )
                 input_ids = encoded["input_ids"].squeeze(0)
@@ -63,6 +77,23 @@ class AffiliateDataset(Dataset):
 
     def __getitem__(self, idx):
         return self.samples[idx]
+
+
+def dynamic_pad_collator(batch, pad_token_id=0):
+    """Pad to the longest sequence in the batch instead of a fixed length."""
+    max_len = max(item["input_ids"].size(0) for item in batch)
+    input_ids, attention_mask, labels = [], [], []
+    for item in batch:
+        seq_len = item["input_ids"].size(0)
+        pad_len = max_len - seq_len
+        input_ids.append(torch.cat([item["input_ids"], torch.full((pad_len,), pad_token_id)]))
+        attention_mask.append(torch.cat([item["attention_mask"], torch.zeros(pad_len, dtype=torch.long)]))
+        labels.append(torch.cat([item["labels"], torch.full((pad_len,), -100)]))
+    return {
+        "input_ids": torch.stack(input_ids),
+        "attention_mask": torch.stack(attention_mask),
+        "labels": torch.stack(labels),
+    }
 
 
 def find_latest_checkpoint():
@@ -103,6 +134,7 @@ def main():
 
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    pad_token_id = tokenizer.pad_token_id
 
     if use_quant:
         from peft import prepare_model_for_kbit_training
@@ -130,12 +162,22 @@ def main():
     print(f"\n📂 加载训练数据: {DATA_PATH}")
     dataset = AffiliateDataset(DATA_PATH, tokenizer)
     print(f"   样本数量: {len(dataset)}")
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=True, collate_fn=default_data_collator)
+
+    collator = lambda batch: dynamic_pad_collator(batch, pad_token_id)
+    dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collator)
+
+    effective_batch = BATCH_SIZE * GRAD_ACCUM_STEPS
+    steps_per_epoch = len(dataloader)
+    total_steps = steps_per_epoch * (num_epochs - start_epoch)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     if training_state is not None:
         optimizer.load_state_dict(training_state["optimizer_state_dict"])
         print(f"   ♻️  已恢复 optimizer 状态 (global_step={global_step})")
+
+    use_amp = device.type in ("cuda", "mps")
+    amp_dtype = torch.float16 if device.type == "cuda" else torch.bfloat16
+    scaler = torch.amp.GradScaler(device.type) if device.type == "cuda" else None
 
     model.train()
 
@@ -144,26 +186,55 @@ def main():
         print(f"\n⏭️  所有 {num_epochs} 个 epoch 已完成，无需继续训练。")
     else:
         print(f"\n🚀 开始训练 (epoch {start_epoch + 1}~{num_epochs}, lr={learning_rate})")
+        print(f"   batch_size={BATCH_SIZE} x grad_accum={GRAD_ACCUM_STEPS} → 有效 batch={effective_batch}")
+        print(f"   每 epoch {steps_per_epoch} 步，剩余共 ~{total_steps} 步")
         print("-" * 50)
 
+        t0 = time.time()
         for epoch in range(start_epoch + 1, num_epochs + 1):
             epoch_loss = 0.0
-            for batch in dataloader:
+            epoch_steps = 0
+            optimizer.zero_grad()
+
+            for batch_idx, batch in enumerate(dataloader):
                 batch = {k: v.to(device) for k, v in batch.items()}
-                outputs = model(**batch)
-                loss = outputs.loss
-                loss.backward()
-                optimizer.step()
-                optimizer.zero_grad()
 
-                epoch_loss += loss.item()
+                if use_amp and device.type == "cuda":
+                    with torch.amp.autocast(device.type, dtype=amp_dtype):
+                        outputs = model(**batch)
+                        loss = outputs.loss / GRAD_ACCUM_STEPS
+                    scaler.scale(loss).backward()
+                else:
+                    outputs = model(**batch)
+                    loss = outputs.loss / GRAD_ACCUM_STEPS
+                    loss.backward()
+
+                epoch_loss += loss.item() * GRAD_ACCUM_STEPS
                 global_step += 1
-                print(f"   Step {global_step:3d} | Loss: {loss.item():.4f}")
+                epoch_steps += 1
 
-            avg_loss = epoch_loss / len(dataloader)
-            print(f"   --- Epoch {epoch}/{num_epochs} 完成 | 平均 Loss: {avg_loss:.4f} ---")
+                is_accum_step = (batch_idx + 1) % GRAD_ACCUM_STEPS == 0 or (batch_idx + 1) == len(dataloader)
+                if is_accum_step:
+                    if scaler is not None:
+                        scaler.step(optimizer)
+                        scaler.update()
+                    else:
+                        optimizer.step()
+                    optimizer.zero_grad()
+
+                if global_step % LOG_EVERY == 0:
+                    elapsed = time.time() - t0
+                    avg = epoch_loss / epoch_steps
+                    print(f"   Step {global_step:4d} | Loss: {loss.item() * GRAD_ACCUM_STEPS:.4f} | "
+                          f"Avg: {avg:.4f} | {elapsed:.0f}s")
+
+            avg_loss = epoch_loss / epoch_steps
+            elapsed = time.time() - t0
+            print(f"   --- Epoch {epoch}/{num_epochs} 完成 | 平均 Loss: {avg_loss:.4f} | 累计 {elapsed:.0f}s ---")
             save_checkpoint(model, optimizer, epoch, global_step)
 
+        total_time = time.time() - t0
+        print(f"\n   ⏱️  训练总耗时: {total_time:.0f}s ({total_time / 60:.1f} min)")
         print("-" * 50)
 
     ADAPTER_DIR.mkdir(parents=True, exist_ok=True)
