@@ -92,7 +92,13 @@ def eval_prompts_hit_rate(model, tokenizer, device):
         hits = [s for s in expected if s in out.lower()]
         total_hits += len(hits)
         total_expected += len(expected)
-        details.append({"hits": len(hits), "expected": len(expected), "matched": hits})
+        details.append({
+            "prompt": ep["prompt"],
+            "output": out,
+            "hits": len(hits),
+            "expected": len(expected),
+            "matched": hits,
+        })
 
     overall = total_hits / total_expected if total_expected else 0
     return overall, details
@@ -142,6 +148,7 @@ def main():
 
     results = {}
     all_samples = {}
+    all_eval_details = {}
 
     for label, adapter_name, data_path in configs:
         print(f"\n{'=' * 70}")
@@ -159,13 +166,14 @@ def main():
         ppl = compute_ppl(model_small, tokenizer, data_path, device)
         print(f"   PPL ({data_path.name}): {ppl:.2f}")
 
-        hit_rate, _ = eval_prompts_hit_rate(model_small, tokenizer, device)
+        hit_rate, eval_details = eval_prompts_hit_rate(model_small, tokenizer, device)
         print(f"   \u9ed1\u8bdd\u547d\u4e2d\u7387: {hit_rate:.1%}")
 
         samples = generate_samples(model_small, tokenizer, device, label)
 
         results[label] = {"ppl": ppl, "slang_hit": hit_rate}
         all_samples[label] = samples
+        all_eval_details[label] = eval_details
 
     # Re-enable adapters after baseline evaluation
     model_small.enable_adapters()
@@ -175,7 +183,8 @@ def main():
     print("\U0001f4cb \u4e09\u6a21\u578b\u5bf9\u6bd4\u6c47\u603b")
     print("=" * 70)
 
-    header = f"{'':30s} {'PPL \u2193':>12s} {'\u9ed1\u8bdd\u547d\u4e2d\u7387 \u2191':>14s}"
+    col1, col2, col3 = "", "PPL ↓", "黑话命中率 ↑"
+    header = f"{col1:30s} {col2:>12s} {col3:>14s}"
     print(f"\n   {header}")
     print(f"   {'-' * 58}")
     for label, metrics in results.items():
@@ -205,6 +214,7 @@ def main():
         "metrics": {k: v for k, v in results.items()},
         "samples": {k: v for k, v in all_samples.items()},
         "prompts": COMPARE_PROMPTS,
+        "eval_details": {k: v for k, v in all_eval_details.items()},
     }
     with open(report_path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)

@@ -4,6 +4,8 @@ Computes three metrics:
   1. Perplexity on held-out data (lower = better language modeling)
   2. Slang Hit Rate (domain term usage in generated outputs)
   3. Side-by-side Before/After comparison on eval prompts
+
+Results are saved to output/step5_evaluate_report.json for later use.
 """
 
 import json
@@ -16,6 +18,9 @@ from utils import (
     detect_device, load_base_model, generate_text,
     ADAPTER_DIR, DATA_PATH, EVAL_PROMPTS_PATH, EXPERIMENT_LABEL,
 )
+
+_BASE = Path(__file__).parent
+REPORT_PATH = _BASE / "output" / f"step5_evaluate_report_{EXPERIMENT_LABEL}.json"
 
 COMMON_SLANG = [
     "\u5bf6", "\u5bf6\u5011", "\u5bb6\u4eba\u5011",
@@ -103,6 +108,8 @@ def evaluate_generation(model, tokenizer, device, label, eval_prompts):
 
         results.append({
             "prompt_idx": i + 1,
+            "prompt": prompt,
+            "output": output,
             "hits": len(hits),
             "expected": len(expected),
             "hit_rate": hit_rate,
@@ -202,6 +209,29 @@ def main():
     print("   - \u9ed1\u8a71\u547d\u4e2d\u7387\u63d0\u5347 = \u6a21\u578b\u80fd\u81ea\u7136\u4f7f\u7528\u53f0\u7063\u96fb\u5546\u8853\u8a9e")
     print("   - \u751f\u4ea7\u73af\u5883\u5efa\u8bae: \u52a0\u5165 LLM-as-Judge (GPT-4 \u6253\u5206) + \u4eba\u5de5\u8bc4\u6d4b")
     print("=" * 60)
+
+    report = {
+        "experiment": EXPERIMENT_LABEL,
+        "perplexity": {
+            "before": ppl_before,
+            "after": ppl_after,
+            "drop_pct": round(ppl_drop, 2),
+        },
+        "slang_hit_rate": {
+            "before": round(overall_before, 4),
+            "after": round(overall_after, 4),
+            "lift_pp": round(slang_lift, 2),
+        },
+        "eval_details": {
+            "before": results_before,
+            "after": results_after,
+        },
+    }
+    REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(REPORT_PATH, "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
+    print(f"\n\U0001f4be \u8bc4\u6d4b\u62a5\u544a\u5df2\u4fdd\u5b58: {REPORT_PATH}")
+
     print("\n\u2705 \u8bc4\u6d4b\u5b8c\u6210\uff01")
 
 

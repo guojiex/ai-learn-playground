@@ -4,12 +4,17 @@ The highlight of the demo: same prompt, drastically different outputs,
 showing how LoRA transforms a generic model into a local e-commerce expert.
 """
 
+import json
+from pathlib import Path
 from peft import PeftModel
 
 from utils import (
     detect_device, load_base_model, generate_text,
-    ADAPTER_DIR, DEMO_PROMPTS,
+    ADAPTER_DIR, DEMO_PROMPTS, EXPERIMENT_LABEL,
 )
+
+_BASE = Path(__file__).parent
+REPORT_PATH = _BASE / "output" / f"step4_inference_report_{EXPERIMENT_LABEL}.json"
 
 
 def main():
@@ -30,6 +35,8 @@ def main():
     tuned_model.eval()
     print(f"   已加载: {ADAPTER_DIR}")
 
+    report = {"comparisons": []}
+
     for i, prompt in enumerate(DEMO_PROMPTS, 1):
         print(f"\n{'=' * 60}")
         print(f"🎯 测试 Prompt {i}:")
@@ -39,11 +46,22 @@ def main():
         print("\n🔴 Before（通用模型 — 无 LoRA）:")
         print("-" * 50)
         with tuned_model.disable_adapter():
-            generate_text(tuned_model, tokenizer, prompt, device)
+            before_output = generate_text(tuned_model, tokenizer, prompt, device)
 
         print("\n🟢 After（微调后 — 挂载 LoRA 适配器）:")
         print("-" * 50)
-        generate_text(tuned_model, tokenizer, prompt, device)
+        after_output = generate_text(tuned_model, tokenizer, prompt, device)
+
+        report["comparisons"].append({
+            "prompt": prompt,
+            "before": before_output,
+            "after": after_output,
+        })
+
+    REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(REPORT_PATH, "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
+    print(f"\n💾 推理对比结果已保存: {REPORT_PATH}")
 
     print(f"\n{'=' * 60}")
     print("\U0001f4a1 \u5173\u952e\u89c2\u5bdf:")
