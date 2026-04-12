@@ -142,11 +142,10 @@ def save_checkpoint(model, optimizer, epoch, global_step, best_loss, patience_co
     print(f"   💾 Checkpoint 已保存: {ckpt_path.name} (已清理旧 checkpoint)")
 
 
-def save_best_model(model, tokenizer):
+def save_best_model(model):
     """Overwrite the best model snapshot whenever a new best loss is reached."""
     BEST_DIR.mkdir(parents=True, exist_ok=True)
     model.save_pretrained(str(BEST_DIR))
-    tokenizer.save_pretrained(str(BEST_DIR))
     print(f"   ⭐ Best model 已更新: {BEST_DIR}")
 
 
@@ -271,7 +270,7 @@ def main():
             if improvement > MIN_DELTA:
                 best_loss = avg_loss
                 patience_counter = 0
-                save_best_model(model, tokenizer)
+                save_best_model(model)
                 status = "⬇️  new best"
             else:
                 patience_counter += 1
@@ -298,7 +297,6 @@ def main():
         print(f"\n💾 最佳 LoRA 适配器已保存到: {ADAPTER_DIR} (来自 best model)")
     else:
         model.save_pretrained(str(ADAPTER_DIR))
-        tokenizer.save_pretrained(str(ADAPTER_DIR))
         print(f"\n💾 LoRA 适配器已保存到: {ADAPTER_DIR}")
 
     # 清理: 删除 checkpoints 和 best 临时目录
