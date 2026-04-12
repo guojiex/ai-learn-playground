@@ -156,27 +156,25 @@ def main():
         print("=" * 70)
 
         if adapter_name is None:
-            model_small.disable_adapters()
+            with model_small.disable_adapter():
+                model_small.eval()
+                ppl = compute_ppl(model_small, tokenizer, data_path, device)
+                print(f"   PPL ({data_path.name}): {ppl:.2f}")
+                hit_rate, eval_details = eval_prompts_hit_rate(model_small, tokenizer, device)
+                print(f"   \u9ed1\u8bdd\u547d\u4e2d\u7387: {hit_rate:.1%}")
+                samples = generate_samples(model_small, tokenizer, device, label)
         else:
-            model_small.enable_adapters()
             model_small.set_adapter(adapter_name)
-
-        model_small.eval()
-
-        ppl = compute_ppl(model_small, tokenizer, data_path, device)
-        print(f"   PPL ({data_path.name}): {ppl:.2f}")
-
-        hit_rate, eval_details = eval_prompts_hit_rate(model_small, tokenizer, device)
-        print(f"   \u9ed1\u8bdd\u547d\u4e2d\u7387: {hit_rate:.1%}")
-
-        samples = generate_samples(model_small, tokenizer, device, label)
+            model_small.eval()
+            ppl = compute_ppl(model_small, tokenizer, data_path, device)
+            print(f"   PPL ({data_path.name}): {ppl:.2f}")
+            hit_rate, eval_details = eval_prompts_hit_rate(model_small, tokenizer, device)
+            print(f"   \u9ed1\u8bdd\u547d\u4e2d\u7387: {hit_rate:.1%}")
+            samples = generate_samples(model_small, tokenizer, device, label)
 
         results[label] = {"ppl": ppl, "slang_hit": hit_rate}
         all_samples[label] = samples
         all_eval_details[label] = eval_details
-
-    # Re-enable adapters after baseline evaluation
-    model_small.enable_adapters()
 
     # ===== Summary Table =====
     print(f"\n\n{'=' * 70}")
