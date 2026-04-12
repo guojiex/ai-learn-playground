@@ -34,3 +34,10 @@ go.work.sum
 venv/
 __pycache__
 .DS_Store
+
+# LoRA training artifacts
+lora/output/**/checkpoints/
+lora/output/**/best/
+lora/output/**/*.safetensors
+lora/output/**/*.bin
+lora/output/**/training_state.pt

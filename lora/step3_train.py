@@ -122,7 +122,13 @@ def find_latest_checkpoint():
 
 
 def save_checkpoint(model, optimizer, epoch, global_step, best_loss, patience_counter):
-    """Save adapter weights + optimizer + early-stopping state."""
+    """Save new checkpoint and delete the previous one (only keep latest)."""
+    # Delete all old checkpoints first
+    if CHECKPOINT_DIR.exists():
+        for old in CHECKPOINT_DIR.glob("epoch-*"):
+            if old.is_dir():
+                shutil.rmtree(old)
+
     ckpt_path = CHECKPOINT_DIR / f"epoch-{epoch}"
     ckpt_path.mkdir(parents=True, exist_ok=True)
     model.save_pretrained(str(ckpt_path))
@@ -133,7 +139,7 @@ def save_checkpoint(model, optimizer, epoch, global_step, best_loss, patience_co
         "best_loss": best_loss,
         "patience_counter": patience_counter,
     }, ckpt_path / "training_state.pt")
-    print(f"   💾 Checkpoint 已保存: {ckpt_path.name}")
+    print(f"   💾 Checkpoint 已保存: {ckpt_path.name} (已清理旧 checkpoint)")
 
 
 def save_best_model(model, tokenizer):
@@ -284,16 +290,22 @@ def main():
         print(f"\n   ⏱️  训练总耗时: {total_time:.0f}s ({total_time / 60:.1f} min)")
         print("-" * 50)
 
+    ADAPTER_DIR.mkdir(parents=True, exist_ok=True)
     if BEST_DIR.exists():
         for f in BEST_DIR.iterdir():
             if f.is_file():
                 shutil.copy2(f, ADAPTER_DIR / f.name)
         print(f"\n💾 最佳 LoRA 适配器已保存到: {ADAPTER_DIR} (来自 best model)")
     else:
-        ADAPTER_DIR.mkdir(parents=True, exist_ok=True)
         model.save_pretrained(str(ADAPTER_DIR))
         tokenizer.save_pretrained(str(ADAPTER_DIR))
         print(f"\n💾 LoRA 适配器已保存到: {ADAPTER_DIR}")
+
+    # 清理: 删除 checkpoints 和 best 临时目录
+    for tmp_dir in (CHECKPOINT_DIR, BEST_DIR):
+        if tmp_dir.exists():
+            shutil.rmtree(tmp_dir)
+    print("   🧹 已清理 checkpoints 和 best 临时目录")
 
     adapter_size = sum(
         os.path.getsize(ADAPTER_DIR / f)
