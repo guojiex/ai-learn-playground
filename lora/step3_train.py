@@ -3,8 +3,15 @@
 用 JSONL 样本数据跑少量训练步骤，展示 loss 下降过程，
 并将训练好的 LoRA adapter 保存到 output/ 目录。
 
-支持断点续训：每个 epoch 结束后保存 checkpoint，
-下次运行时自动从最近的 checkpoint 恢复。
+收敛策略:
+  - 设置最大 epoch 上限（MAX_EPOCHS），作为保底
+  - Early stopping: 连续 PATIENCE 个 epoch loss 下降不超过
+    MIN_DELTA 时自动停止，避免过拟合和浪费时间
+  - 始终保存 best model（loss 最低的那个 epoch）
+
+断点续训:
+  - 每个 epoch 结束后保存 checkpoint（含 best_loss / patience 状态）
+  - 下次运行时自动从最近的 checkpoint 恢复
 
 性能优化:
   - 动态 padding（按 batch 内最长序列对齐，而非固定 256）
@@ -15,6 +22,7 @@
 
 import json
 import os
+import shutil
 import time
 import torch
 from pathlib import Path
@@ -26,10 +34,15 @@ from utils import detect_device, load_base_model, ADAPTER_DIR, DATA_PATH
 from step2_lora_inject import get_lora_config
 
 CHECKPOINT_DIR = ADAPTER_DIR / "checkpoints"
+BEST_DIR = ADAPTER_DIR / "best"
 
 BATCH_SIZE = 4
 GRAD_ACCUM_STEPS = 4
 LOG_EVERY = 10
+
+MAX_EPOCHS = 30
+PATIENCE = 3
+MIN_DELTA = 0.01
 
 
 class AffiliateDataset(Dataset):
@@ -108,8 +121,8 @@ def find_latest_checkpoint():
     return latest, epoch_num
 
 
-def save_checkpoint(model, optimizer, epoch, global_step):
-    """Save adapter weights + optimizer state after each epoch."""
+def save_checkpoint(model, optimizer, epoch, global_step, best_loss, patience_counter):
+    """Save adapter weights + optimizer + early-stopping state."""
     ckpt_path = CHECKPOINT_DIR / f"epoch-{epoch}"
     ckpt_path.mkdir(parents=True, exist_ok=True)
     model.save_pretrained(str(ckpt_path))
@@ -117,8 +130,18 @@ def save_checkpoint(model, optimizer, epoch, global_step):
         "optimizer_state_dict": optimizer.state_dict(),
         "epoch": epoch,
         "global_step": global_step,
+        "best_loss": best_loss,
+        "patience_counter": patience_counter,
     }, ckpt_path / "training_state.pt")
     print(f"   💾 Checkpoint 已保存: {ckpt_path.name}")
+
+
+def save_best_model(model, tokenizer):
+    """Overwrite the best model snapshot whenever a new best loss is reached."""
+    BEST_DIR.mkdir(parents=True, exist_ok=True)
+    model.save_pretrained(str(BEST_DIR))
+    tokenizer.save_pretrained(str(BEST_DIR))
+    print(f"   ⭐ Best model 已更新: {BEST_DIR}")
 
 
 def main():
@@ -126,7 +149,6 @@ def main():
     print('\U0001f4cc Step 3: \u5fae\u8c03\u8bad\u7ec3 \u2014 \u7528 5% \u4e1a\u52a1\u6570\u636e\u6ce8\u5165\u201c\u672c\u5730\u7075\u9b42\u201d')
     print("=" * 60)
 
-    num_epochs = 10
     learning_rate = 3e-4
 
     device, use_quant = detect_device()
@@ -141,17 +163,29 @@ def main():
         model = prepare_model_for_kbit_training(model)
 
     latest_ckpt, start_epoch = find_latest_checkpoint()
+    best_loss = float("inf")
+    patience_counter = 0
+    already_converged = False
 
-    if latest_ckpt is not None and start_epoch < num_epochs:
-        print(f"\n♻️  检测到 checkpoint: {latest_ckpt.name}，从 epoch {start_epoch + 1} 继续训练")
-        model = PeftModel.from_pretrained(model, str(latest_ckpt))
+    if latest_ckpt is not None:
         training_state = torch.load(latest_ckpt / "training_state.pt", map_location=device, weights_only=True)
+        best_loss = training_state.get("best_loss", float("inf"))
+        patience_counter = training_state.get("patience_counter", 0)
         global_step = training_state["global_step"]
-    else:
-        if latest_ckpt is not None and start_epoch >= num_epochs:
-            print(f"\n✅ 已完成全部 {num_epochs} 个 epoch 的训练，跳过训练直接保存最终适配器。")
+
+        if patience_counter >= PATIENCE:
+            print(f"\n✅ 之前已在 epoch {start_epoch} 收敛停止 (patience={PATIENCE})，无需继续训练。")
+            already_converged = True
+        elif start_epoch >= MAX_EPOCHS:
+            print(f"\n✅ 已达到最大 epoch 上限 ({MAX_EPOCHS})，无需继续训练。")
+            already_converged = True
         else:
-            print("\n🆕 未检测到 checkpoint，从头开始训练")
+            print(f"\n♻️  检测到 checkpoint: {latest_ckpt.name}，从 epoch {start_epoch + 1} 继续训练")
+            print(f"   best_loss={best_loss:.4f}, patience={patience_counter}/{PATIENCE}")
+
+        model = PeftModel.from_pretrained(model, str(latest_ckpt))
+    else:
+        print("\n🆕 未检测到 checkpoint，从头开始训练")
         peft_config = get_lora_config()
         model = get_peft_model(model, peft_config)
         training_state = None
@@ -168,10 +202,9 @@ def main():
 
     effective_batch = BATCH_SIZE * GRAD_ACCUM_STEPS
     steps_per_epoch = len(dataloader)
-    total_steps = steps_per_epoch * (num_epochs - start_epoch)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
-    if training_state is not None:
+    if training_state is not None and not already_converged:
         optimizer.load_state_dict(training_state["optimizer_state_dict"])
         print(f"   ♻️  已恢复 optimizer 状态 (global_step={global_step})")
 
@@ -181,17 +214,14 @@ def main():
 
     model.train()
 
-    remaining = num_epochs - start_epoch
-    if remaining <= 0:
-        print(f"\n⏭️  所有 {num_epochs} 个 epoch 已完成，无需继续训练。")
-    else:
-        print(f"\n🚀 开始训练 (epoch {start_epoch + 1}~{num_epochs}, lr={learning_rate})")
+    if not already_converged:
+        print(f"\n🚀 开始训练 (最大 {MAX_EPOCHS} epochs, early stopping patience={PATIENCE}, min_delta={MIN_DELTA})")
         print(f"   batch_size={BATCH_SIZE} x grad_accum={GRAD_ACCUM_STEPS} → 有效 batch={effective_batch}")
-        print(f"   每 epoch {steps_per_epoch} 步，剩余共 ~{total_steps} 步")
+        print(f"   每 epoch {steps_per_epoch} 步")
         print("-" * 50)
 
         t0 = time.time()
-        for epoch in range(start_epoch + 1, num_epochs + 1):
+        for epoch in range(start_epoch + 1, MAX_EPOCHS + 1):
             epoch_loss = 0.0
             epoch_steps = 0
             optimizer.zero_grad()
@@ -230,17 +260,40 @@ def main():
 
             avg_loss = epoch_loss / epoch_steps
             elapsed = time.time() - t0
-            print(f"   --- Epoch {epoch}/{num_epochs} 完成 | 平均 Loss: {avg_loss:.4f} | 累计 {elapsed:.0f}s ---")
-            save_checkpoint(model, optimizer, epoch, global_step)
+
+            improvement = best_loss - avg_loss
+            if improvement > MIN_DELTA:
+                best_loss = avg_loss
+                patience_counter = 0
+                save_best_model(model, tokenizer)
+                status = "⬇️  new best"
+            else:
+                patience_counter += 1
+                status = f"⏸️  no improve ({patience_counter}/{PATIENCE})"
+
+            print(f"   --- Epoch {epoch} | Avg Loss: {avg_loss:.4f} | Best: {best_loss:.4f} | "
+                  f"{status} | {elapsed:.0f}s ---")
+            save_checkpoint(model, optimizer, epoch, global_step, best_loss, patience_counter)
+
+            if patience_counter >= PATIENCE:
+                print(f"\n   🛑 Early stopping: 连续 {PATIENCE} 个 epoch loss 未明显下降 (delta < {MIN_DELTA})")
+                print(f"   最终停在 epoch {epoch}，best loss = {best_loss:.4f}")
+                break
 
         total_time = time.time() - t0
         print(f"\n   ⏱️  训练总耗时: {total_time:.0f}s ({total_time / 60:.1f} min)")
         print("-" * 50)
 
-    ADAPTER_DIR.mkdir(parents=True, exist_ok=True)
-    model.save_pretrained(str(ADAPTER_DIR))
-    tokenizer.save_pretrained(str(ADAPTER_DIR))
-    print(f"\n💾 LoRA 适配器已保存到: {ADAPTER_DIR}")
+    if BEST_DIR.exists():
+        for f in BEST_DIR.iterdir():
+            if f.is_file():
+                shutil.copy2(f, ADAPTER_DIR / f.name)
+        print(f"\n💾 最佳 LoRA 适配器已保存到: {ADAPTER_DIR} (来自 best model)")
+    else:
+        ADAPTER_DIR.mkdir(parents=True, exist_ok=True)
+        model.save_pretrained(str(ADAPTER_DIR))
+        tokenizer.save_pretrained(str(ADAPTER_DIR))
+        print(f"\n💾 LoRA 适配器已保存到: {ADAPTER_DIR}")
 
     adapter_size = sum(
         os.path.getsize(ADAPTER_DIR / f)
