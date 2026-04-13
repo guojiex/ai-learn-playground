@@ -30,7 +30,7 @@ from torch.utils.data import Dataset, DataLoader
 from peft import get_peft_model, PeftModel, TaskType
 from transformers import default_data_collator
 
-from utils import detect_device, load_base_model, ADAPTER_DIR, DATA_PATH
+from utils import detect_device, load_base_model, ADAPTER_DIR, DATA_PATH, EXPERIMENT_LABEL
 from step2_lora_inject import get_lora_config
 
 CHECKPOINT_DIR = ADAPTER_DIR / "checkpoints"
@@ -42,7 +42,7 @@ LOG_EVERY = 10
 
 MAX_EPOCHS = 30
 PATIENCE = 3
-MIN_DELTA = 0.01
+MIN_DELTA = 0.005
 
 
 class AffiliateDataset(Dataset):
@@ -154,7 +154,7 @@ def main():
     print('\U0001f4cc Step 3: \u5fae\u8c03\u8bad\u7ec3 \u2014 \u7528 5% \u4e1a\u52a1\u6570\u636e\u6ce8\u5165\u201c\u672c\u5730\u7075\u9b42\u201d')
     print("=" * 60)
 
-    learning_rate = 3e-4
+    learning_rate = 2e-4 if "large" in EXPERIMENT_LABEL else 3e-4
 
     device, use_quant = detect_device()
     tokenizer, model = load_base_model(device, use_quant)

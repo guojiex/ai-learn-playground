@@ -3,19 +3,36 @@
 演示核心卖点：只需训练不到 1% 的参数，即可对大模型进行微调。
 """
 
+import os
 from peft import LoraConfig, get_peft_model, TaskType
 from utils import detect_device, load_base_model
 
 
-def get_lora_config():
-    """Return the LoRA config tuned for TW affiliate marketing."""
-    return LoraConfig(
-        task_type=TaskType.CAUSAL_LM,
-        inference_mode=False,
+LORA_PROFILES = {
+    "default": dict(
         r=16,
         lora_alpha=32,
         lora_dropout=0.1,
         target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
+    ),
+    "large": dict(
+        r=16,
+        lora_alpha=32,
+        lora_dropout=0.05,
+        target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
+    ),
+}
+
+
+def get_lora_config():
+    """Return the LoRA config, auto-selecting profile based on LORA_EXPERIMENT."""
+    experiment = os.environ.get("LORA_EXPERIMENT", "default")
+    profile_key = "large" if "large" in experiment else "default"
+    profile = LORA_PROFILES[profile_key]
+    return LoraConfig(
+        task_type=TaskType.CAUSAL_LM,
+        inference_mode=False,
+        **profile,
     )
 
 
