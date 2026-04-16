@@ -1,0 +1,26 @@
+[
+  {
+    "id": "power-bank-10000",
+    "url": "https://shop.example/power-bank-10000",
+    "title": "10000mAh Fast Charging Power Bank",
+    "price": 19.9,
+    "category": "electronics",
+    "highlights": [
+      "10000mAh portable battery",
+      "dual-port fast charging",
+      "compact body for travel"
+    ]
+  },
+  {
+    "id": "blender-mini",
+    "url": "https://shop.example/blender-mini",
+    "title": "Mini Portable Blender",
+    "price": 14.5,
+    "category": "home",
+    "highlights": [
+      "USB rechargeable",
+      "easy to clean",
+      "great for smoothies on the go"
+    ]
+  }
+]

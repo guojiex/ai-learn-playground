@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ .Title }}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <h1>{{ .Title }}</h1>
+      <p>用一条 affiliate 业务流练习 Prompt、结构化输出、RAG、Tools 与 LangGraph。</p>
+    </section>
+
+    <section class="panel">
+      <form id="run-form">
+        <label>
+          商品链接
+          <input name="product_url" value="https://shop.example/power-bank-10000">
+        </label>
+        <label>
+          商品描述
+          <input name="product_text" placeholder="也可以不填链接，直接填一段商品描述">
+        </label>
+        <label>
+          平台
+          <input name="platform" value="TikTok">
+        </label>
+        <label>
+          地区/语言
+          <input name="locale" value="id-ID">
+        </label>
+        <label>
+          风格
+          <input name="style" value="casual">
+        </label>
+        <label>
+          最低佣金阈值
+          <input name="min_commission_rate" type="number" step="0.01" value="0.10">
+        </label>
+        <label class="checkbox">
+          <input name="enable_compression" type="checkbox" checked>
+          启用压缩检索
+        </label>
+        <button type="submit">运行完整流程</button>
+      </form>
+    </section>
+
+    <section class="grid">
+      <article class="panel">
+        <h2>结构化结果</h2>
+        <pre id="result-panel">等待运行...</pre>
+      </article>
+      <article class="panel">
+        <h2>检索证据</h2>
+        <pre id="retrieval-panel">等待运行...</pre>
+      </article>
+      <article class="panel">
+        <h2>工具调用</h2>
+        <pre id="tools-panel">等待运行...</pre>
+      </article>
+      <article class="panel">
+        <h2>Graph Trace</h2>
+        <pre id="trace-panel">等待运行...</pre>
+      </article>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
