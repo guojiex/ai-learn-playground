@@ -20,12 +20,12 @@ func main() {
 	}
 	projectRoot := filepath.Dir(workingDir)
 	pythonDir := filepath.Join(projectRoot, "python")
-	templatePath := filepath.Join(workingDir, "web", "templates", "studio.html")
+	templatesGlob := filepath.Join(workingDir, "web", "templates", "*.html")
 	staticDir := filepath.Join(workingDir, "web", "static")
 
-	tmpl, err := template.ParseFiles(templatePath)
+	tmpl, err := template.ParseGlob(templatesGlob)
 	if err != nil {
-		log.Fatalf("parse template: %v", err)
+		log.Fatalf("parse templates: %v", err)
 	}
 
 	workerClient, err := worker.Start(context.Background(), pythonDir)

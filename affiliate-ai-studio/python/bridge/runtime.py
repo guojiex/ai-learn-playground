@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import os
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -12,6 +14,8 @@ from rag.indexer import load_kb_documents
 from rag.retriever import KeywordRetriever
 from tools.commission_tools import CommissionLookupTool
 from tools.product_tools import ProductLookupTool
+
+logger = logging.getLogger("affiliate.bridge")
 
 
 @dataclass
@@ -64,6 +68,36 @@ def dispatch(runtime: Runtime, request: dict[str, Any]) -> dict[str, Any]:
             "error": {"code": "validation_error", "message": f"unsupported action: {action}"},
         }
     except LookupError as exc:
-        return {"status": "error", "error": {"code": "tool_error", "message": str(exc)}}
+        logger.warning(
+            "tool_error action=%s session=%s payload_keys=%s msg=%s",
+            action,
+            session_id,
+            sorted(payload.keys()) if isinstance(payload, dict) else None,
+            exc,
+        )
+        return {
+            "status": "error",
+            "error": {
+                "code": "tool_error",
+                "message": str(exc),
+                "action": action,
+                "session_id": session_id,
+            },
+        }
     except Exception as exc:  # pragma: no cover - defensive path for worker stability
-        return {"status": "error", "error": {"code": "generation_error", "message": str(exc)}}
+        logger.exception(
+            "generation_error action=%s session=%s payload_keys=%s",
+            action,
+            session_id,
+            sorted(payload.keys()) if isinstance(payload, dict) else None,
+        )
+        return {
+            "status": "error",
+            "error": {
+                "code": "generation_error",
+                "message": str(exc),
+                "action": action,
+                "session_id": session_id,
+                "trace": traceback.format_exc(),
+            },
+        }

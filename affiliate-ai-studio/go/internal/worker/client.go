@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"os"
 	"os/exec"
 	"sync"
 )
@@ -60,7 +62,7 @@ func Start(ctx context.Context, pythonDir string) (*Client, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start worker: %w", err)
 	}
-	go io.Copy(io.Discard, stderr)
+	go pipeWorkerStderr(stderr)
 
 	return &Client{
 		cmd:    cmd,
@@ -122,6 +124,19 @@ func (c *Client) Call(ctx context.Context, req Request) (Response, error) {
 
 func (c *Client) Ready() bool {
 	return c != nil && c.ready
+}
+
+func pipeWorkerStderr(r io.ReadCloser) {
+	defer r.Close()
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	logger := log.New(os.Stderr, "[worker] ", log.LstdFlags|log.Lmicroseconds)
+	for scanner.Scan() {
+		logger.Println(scanner.Text())
+	}
+	if err := scanner.Err(); err != nil && !errors.Is(err, io.EOF) {
+		logger.Printf("stderr pipe closed: %v", err)
+	}
 }
 
 func (c *Client) Close() error {

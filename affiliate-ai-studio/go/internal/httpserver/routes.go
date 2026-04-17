@@ -8,6 +8,7 @@ func NewMux(handler *Handler, static http.Handler) *http.ServeMux {
 		http.Redirect(w, r, "/studio", http.StatusFound)
 	})
 	mux.HandleFunc("GET /studio", handler.StudioPage)
+	mux.HandleFunc("GET /learn", handler.LearnPage)
 	mux.HandleFunc("POST /api/affiliate/run", handler.RunAffiliateFlow)
 	mux.HandleFunc("GET /healthz", handler.Healthz)
 	mux.HandleFunc("GET /readyz", handler.Readyz)

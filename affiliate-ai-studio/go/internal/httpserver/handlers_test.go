@@ -16,7 +16,9 @@ import (
 
 func newTestTemplate(t *testing.T) *template.Template {
 	t.Helper()
-	return template.Must(template.New("studio").Parse(`<html><body>Affiliate AI Studio</body></html>`))
+	tmpl := template.Must(template.New("studio.html").Parse(`<html><body>Affiliate AI Studio</body></html>`))
+	template.Must(tmpl.New("learn.html").Parse(`<html><body>Learn AI Together</body></html>`))
+	return tmpl
 }
 
 type stubWorker struct {
@@ -49,6 +51,21 @@ func TestStudioPageRenders(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "Affiliate AI Studio") {
 		t.Fatalf("expected studio page content, got %q", rec.Body.String())
+	}
+}
+
+func TestLearnPageRenders(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/learn", nil)
+	rec := httptest.NewRecorder()
+
+	handler := NewHandler(nil, newTestTemplate(t))
+	handler.LearnPage(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "Learn AI Together") {
+		t.Fatalf("expected learn page content, got %q", rec.Body.String())
 	}
 }
 

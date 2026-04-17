@@ -1,0 +1,610 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ .Title }}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/learn.css">
+</head>
+<body class="learn-body">
+  <header class="learn-header">
+    <div class="learn-header__brand">
+      <strong>Affiliate AI Studio</strong>
+      <span>Learn · 码农视角看 AI 这套代码在干嘛</span>
+    </div>
+    <nav class="learn-header__nav">
+      <a href="/studio">回到 Studio</a>
+      <a href="#ch-1" class="primary">开始学习</a>
+    </nav>
+  </header>
+
+  <div class="learn-layout">
+    <aside class="learn-sidebar">
+      <div class="learn-sidebar__title">章节目录</div>
+      <ol class="learn-toc">
+        <li><a href="#ch-0" data-chapter="ch-0">0 · 全景：一次点"运行"发生了什么</a></li>
+        <li><a href="#ch-1" data-chapter="ch-1">1 · Prompt 工程 · ChatPromptTemplate</a></li>
+        <li><a href="#ch-2" data-chapter="ch-2">2 · 结构化输出 · Pydantic Schema</a></li>
+        <li><a href="#ch-3" data-chapter="ch-3">3 · RAG 检索 · 三步走</a></li>
+        <li><a href="#ch-4" data-chapter="ch-4">4 · Tools · 让 LLM 查外部数据</a></li>
+        <li><a href="#ch-5" data-chapter="ch-5">5 · LangGraph · 状态机编排</a></li>
+        <li><a href="#ch-6" data-chapter="ch-6">6 · Go ↔ Python 桥 · 进程间 JSONL</a></li>
+        <li><a href="#ch-7" data-chapter="ch-7">7 · LocalModelAdapter · 真假模型切换点</a></li>
+        <li><a href="#ch-8" data-chapter="ch-8">8 · 实战路径 · 按顺序怎么练</a></li>
+      </ol>
+      <div class="learn-sidebar__tip">
+        <strong>怎么读这一页</strong>
+        <p>每节都按固定 5 块呈现：一句话 / 对应代码 / 关键片段 / 为什么这么写 / 动手练习。优先读"为什么这么写"，再点进对应源码对照。</p>
+      </div>
+    </aside>
+
+    <main class="learn-main">
+
+      <section class="chapter" id="ch-0">
+        <div class="chapter__tag">章节 0 · 全景</div>
+        <h2>一次点"运行"发生了什么</h2>
+        <p class="chapter__lead">整个系统是 <strong>Go 当 Web 壳 + Python 当 AI 引擎</strong>。Go 跑 HTTP，Python 用 <code>langchain</code>/<code>langgraph</code> 算，两头用 stdin/stdout 的 JSONL 通信。</p>
+
+        <div class="block">
+          <h3>调用时序</h3>
+          <pre class="ascii">浏览器 ──POST /api/affiliate/run──▶ Go Handler
+                                     │
+                                     ├─ Validate()
+                                     │
+                                     ├─ app.RunAffiliateFlow()
+                                     │     └─ worker.Call(JSONL 请求)
+                                     │              │
+                                     │              ▼ stdin
+                                     │         Python worker (main.py)
+                                     │              │
+                                     │              ├─ bridge.runtime.dispatch()
+                                     │              └─ graph.run_affiliate_graph()
+                                     │                     normalize → fetch → commission
+                                     │                       → retrieve → generate → finalize
+                                     │              ▲ stdout
+                                     ◀── JSONL 响应 ─┘</pre>
+        </div>
+
+        <div class="block">
+          <h3>关键文件对照</h3>
+          <table class="fileref">
+            <thead><tr><th>文件</th><th>职责</th></tr></thead>
+            <tbody>
+              <tr><td><code>go/cmd/studio/main.go</code></td><td>Go 进程入口，启动 worker + ListenAndServe</td></tr>
+              <tr><td><code>go/internal/httpserver/</code></td><td>路由 + Handler + JSON I/O</td></tr>
+              <tr><td><code>go/internal/worker/client.go</code></td><td>管理 Python 子进程，发 JSONL</td></tr>
+              <tr><td><code>python/main.py</code></td><td>Python worker，按行读请求、写响应</td></tr>
+              <tr><td><code>python/bridge/runtime.py</code></td><td>装配 Tool / Retriever / Model，action 分发</td></tr>
+              <tr><td><code>python/graph/affiliate_graph.py</code></td><td>整个业务流的状态机核心</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="block">
+          <h3>为什么这么拆</h3>
+          <ul>
+            <li><strong>Go 负责 I/O 与编排</strong>：HTTP、静态资源、超时控制、健康检查这些 Go 的长项。</li>
+            <li><strong>Python 负责 AI 推理</strong>：因为 LangChain / LangGraph / transformers 生态都在 Python。</li>
+            <li><strong>子进程 + stdin/stdout</strong>：既不用搭 HTTP server，也能被 Go 监管生命周期，错了就拉起来。</li>
+          </ul>
+        </div>
+
+        <div class="block practice">
+          <h3>动手练习</h3>
+          <ol>
+            <li>打开 Studio，点一次"运行完整流程"。</li>
+            <li>看 Go 的 log，再看返回 JSON 里的 <code>trace</code>，把每个节点和上面的时序图对上号。</li>
+            <li>把 <code>python/main.py</code> 的 print 替换成打印到 stderr，看 Go worker 里是怎么被丢掉/保留的（见 <code>client.go</code> 里的 <code>io.Copy(io.Discard, stderr)</code>）。</li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="chapter" id="ch-1">
+        <div class="chapter__tag">章节 1 · Prompt 工程</div>
+        <h2>ChatPromptTemplate：把"字符串拼接"升级成可复用的模板</h2>
+        <p class="chapter__lead">一句话：<strong>ChatPromptTemplate</strong> 就是带占位符的多角色模板，<code>format_messages</code> 填参数后给 LLM。</p>
+
+        <div class="block">
+          <h3>对应代码</h3>
+          <p><code>python/labs/prompt_lab.py</code></p>
+        </div>
+
+        <figure class="codecard">
+          <figcaption><code>python/labs/prompt_lab.py</code> · L15-L44</figcaption>
+          <pre><code>    prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                (
+                    "You are an affiliate copywriting assistant. "
+                    "Generate compliant copy for {platform} in locale {locale} "
+                    "with a {style} style."
+                ),
+            ),
+            (
+                "human",
+                (
+                    "Product title: {title}\n"
+                    "Highlights: {highlights}\n"
+                    "Policy context: {policy_context}\n"
+                    "Return a concise affiliate copy plan."
+                ),
+            ),
+        ]
+    )
+    messages = prompt.format_messages(
+        platform=platform,
+        locale=locale,
+        style=style,
+        title=product_info.get("title", ""),
+        highlights=", ".join(product_info.get("highlights", [])),
+        policy_context="\n".join(context_docs),
+    )</code></pre>
+        </figure>
+
+        <div class="block">
+          <h3>为什么这么写</h3>
+          <ul>
+            <li><strong>角色分工</strong>：<code>system</code> 立人设、立规则；<code>human</code> 放动态输入。这是 chat 模型的通用约定。</li>
+            <li><strong>变量外置</strong>：所有 <code>{platform}</code> / <code>{title}</code> 都通过参数注入，能被 LangGraph 的节点、或 prompt lab 的调试页复用。</li>
+            <li><strong>可观测</strong>：最后用 <code>format_messages</code> 渲染出来的文本会回传前端（<code>debug.rendered_prompt</code>），方便人眼对照。</li>
+          </ul>
+        </div>
+
+        <div class="block concept">
+          <h3>背后的 AI 概念</h3>
+          <p><strong>Prompt 工程</strong>的核心不是"写一段话"，而是 <em>把动态输入和固定约束解耦</em>。模板化后，你可以 A/B 两套 system prompt、沉淀多语言版本、做 few-shot（把示例放在 messages 列表里）。LangChain 的 <code>ChatPromptTemplate</code> 就是这套思路的骨架。</p>
+        </div>
+
+        <div class="block practice">
+          <h3>动手练习</h3>
+          <ol>
+            <li>把 system 里的"affiliate copywriting assistant"改成"严谨的电商合规审核员"，再跑一次，看 <code>result.copy.risk_notes</code> 有没有变化（注意：当前 mock 模型不会真的响应，但渲染的 prompt 会变——这就是分层调试的意义）。</li>
+            <li>给 prompt 加一个 few-shot 示例，试试在 <code>from_messages</code> 列表里加 <code>("human", "...")</code>、<code>("ai", "...")</code>。</li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="chapter" id="ch-2">
+        <div class="chapter__tag">章节 2 · 结构化输出</div>
+        <h2>Pydantic Schema：让 LLM 吐 JSON 不再玄学</h2>
+        <p class="chapter__lead">一句话：用 <strong>Pydantic</strong> 定义"我要什么结构"，下游就能稳定消费。</p>
+
+        <div class="block">
+          <h3>对应代码</h3>
+          <p><code>python/schemas/models.py</code></p>
+        </div>
+
+        <figure class="codecard">
+          <figcaption><code>python/schemas/models.py</code> · L8-L19</figcaption>
+          <pre><code>class AffiliateCopy(BaseModel):
+    title: str = Field(description="An engaging affiliate copy title")
+    selling_points: list[str] = Field(description="Top three selling points")
+    localized_hook: str = Field(description="Localized audience hook")
+    risk_notes: list[str] = Field(description="Compliance reminders")
+
+
+class AffiliateDecision(BaseModel):
+    decision: Literal["accepted", "rejected", "needs_review"]
+    reason: str
+    commission_rate: float
+    copy_output: Optional[AffiliateCopy] = Field(default=None, alias="copy", serialization_alias="copy")</code></pre>
+        </figure>
+
+        <div class="block">
+          <h3>为什么这么写</h3>
+          <ul>
+            <li><strong>Schema 先行</strong>：API 层、前端、测试都依赖同一份契约，省得 LLM 时不时少字段崩掉。</li>
+            <li><strong>Literal 约束枚举</strong>：<code>decision</code> 只能是三选一，这种"强约束"对业务路由很重要（见第 5 章）。</li>
+            <li><strong>alias/serialization_alias</strong>：业务想用 <code>copy</code> 这个词，但 Pydantic 基类保留了这个属性名，所以内部叫 <code>copy_output</code>，对外 JSON 照样叫 <code>copy</code>。</li>
+          </ul>
+        </div>
+
+        <div class="block concept">
+          <h3>背后的 AI 概念</h3>
+          <p><strong>Structured Output</strong> 是让 LLM 从"写文章"转向"填表单"。工程上通常两种做法：(a) 函数调用 / Tool schema（OpenAI、Anthropic 的 tool use）；(b) 引导 LLM 输出 JSON，再用 Pydantic 校验。我们这里用 (b)，更贴近本地模型场景。</p>
+        </div>
+
+        <div class="block practice">
+          <h3>动手练习</h3>
+          <ol>
+            <li>给 <code>AffiliateCopy</code> 加一个 <code>call_to_action: str</code> 字段，看看 mock 模型的生成是否还能通过校验。</li>
+            <li>在 <code>LocalModelAdapter</code> 里故意返回少一个字段的 JSON，观察 Pydantic 抛啥异常、最后怎么被 <code>dispatch</code> 里的 <code>except Exception</code> 包成 <code>generation_error</code>。</li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="chapter" id="ch-3">
+        <div class="chapter__tag">章节 3 · RAG 检索</div>
+        <h2>检索增强：索引 / 召回 / 压缩 三步</h2>
+        <p class="chapter__lead">一句话：RAG 不神秘，<strong>就是把外部知识塞进 prompt 之前那几步预处理</strong>。</p>
+
+        <div class="block">
+          <h3>对应代码</h3>
+          <ul>
+            <li><code>python/rag/indexer.py</code> — 加载知识库文档</li>
+            <li><code>python/rag/retriever.py</code> — 关键词召回 + 句级压缩</li>
+            <li><code>assets/kb/</code> — 我们的"知识库"（markdown 文件）</li>
+          </ul>
+        </div>
+
+        <figure class="codecard">
+          <figcaption><code>python/rag/retriever.py</code> · L15-L48</figcaption>
+          <pre><code>    def search(self, query: str, top_k: int = 3) -&gt; list[dict]:
+        query_tokens = _tokenize(query)
+        scored: list[tuple[int, dict]] = []
+        for doc in self.documents:
+            score = len(query_tokens.intersection(_tokenize(doc.get("text", "") + " " + doc.get("title", ""))))
+            if score &gt; 0:
+                scored.append((score, {**doc, "score": score}))
+        if not scored and self.documents:
+            scored = [(1, {**self.documents[0], "score": 1})]
+        scored.sort(key=lambda item: item[0], reverse=True)
+        return [item[1] for item in scored[:top_k]]
+
+    def compress(self, query: str, hits: list[dict]) -&gt; list[dict]:
+        query_tokens = _tokenize(query)
+        compressed: list[dict] = []
+        for hit in hits:
+            sentences = re.split(r"(?&lt;=[.!?])\s+", hit.get("text", "").strip())
+            excerpt = ""
+            for sentence in sentences:
+                if query_tokens.intersection(_tokenize(sentence)):
+                    excerpt = sentence
+                    break</code></pre>
+        </figure>
+
+        <div class="block">
+          <h3>为什么这么写</h3>
+          <ul>
+            <li><strong>Mock 先跑通，再升级</strong>：用关键词交集模拟"相似度打分"，不依赖 embedding 模型，下单机零配置就能演示完整链路。</li>
+            <li><strong>search + compress 两阶段</strong>：真实 RAG 里你也会先召回（粗筛），再做 Contextual Compression（只留相关句），减少塞给 LLM 的 token。</li>
+          </ul>
+        </div>
+
+        <div class="block concept">
+          <h3>背后的 AI 概念</h3>
+          <ol>
+            <li><strong>Indexing</strong>（<code>indexer.py</code>）：把原文切块、存到向量库。</li>
+            <li><strong>Retrieval</strong>（<code>search</code>）：用查询的向量在向量库里找 Top-K。真实版用 Embedding 模型 + FAISS/Chroma。</li>
+            <li><strong>Contextual Compression</strong>（<code>compress</code>）：只抽出每个文档里跟查询最相关的片段，节省上下文空间。</li>
+          </ol>
+        </div>
+
+        <div class="block practice">
+          <h3>动手练习</h3>
+          <ol>
+            <li>在 <code>assets/kb/</code> 里加一份新 markdown，不改代码再跑一次，验证 indexer 自动发现（详见 <code>indexer.py</code>）。</li>
+            <li>把 <code>KeywordRetriever</code> 换成基于 <code>sentence-transformers</code> 的向量检索：保持接口 (<code>search</code> / <code>compress</code>) 不变，<code>bridge/runtime.py</code> 换实现即可。这是典型的"适配器模式"练手。</li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="chapter" id="ch-4">
+        <div class="chapter__tag">章节 4 · Tools</div>
+        <h2>工具调用：让 LLM 不必"硬编"世界的事实</h2>
+        <p class="chapter__lead">一句话：Tool 就是 LLM 拿不到/记不住的数据，交给后端确定性查一下。</p>
+
+        <div class="block">
+          <h3>对应代码</h3>
+          <ul>
+            <li><code>python/tools/product_tools.py</code> — 商品信息查 fixtures</li>
+            <li><code>python/tools/commission_tools.py</code> — 佣金率查 fixtures</li>
+          </ul>
+        </div>
+
+        <figure class="codecard">
+          <figcaption><code>python/tools/product_tools.py</code> · lookup</figcaption>
+          <pre><code>    def lookup(self, product_url: str, product_text: str) -&gt; dict:
+        if product_url:
+            for fixture in self.fixtures:
+                if fixture.get("url") == product_url:
+                    return fixture
+        if product_text:
+            lowered = product_text.lower()
+            for fixture in self.fixtures:
+                title = fixture.get("title", "").lower()
+                if title and (title in lowered or lowered in title):
+                    return fixture
+
+        if self.strict:
+            raise LookupError(f"no matching product fixture found: url={product_url!r} ...")
+        logger.warning("product_lookup_fallback url=%r text=%r", product_url, product_text)
+        return _build_fallback(product_url, product_text)  # 带 fallback: True 标记</code></pre>
+        </figure>
+
+        <div class="block">
+          <h3>为什么这么写</h3>
+          <ul>
+            <li><strong>默认兜底，严格可选</strong>：默认未命中返回带 <code>fallback: True</code> 标记的占位 fixture（id = <code>fallback-unknown</code>），让 Graph 能跑通展示全链路；真要生产级"宁可失败也不让 LLM 胡编商品"，构造时传 <code>strict=True</code> 即恢复抛错行为。</li>
+            <li><strong>输入兜底</strong>：URL 优先，其次关键词模糊匹配。真实项目里这里就是"调用电商商品 API"。</li>
+            <li><strong>错误可观测</strong>：兜底会打 <code>WARNING</code>；严格模式下 <code>bridge/runtime.py</code> 把 <code>LookupError</code> 翻译成带 <code>action/session_id</code> 的 <code>tool_error</code>，同时写进 worker stderr（Go 侧以 <code>[worker]</code> 前缀转发），排查不再只有一句话。</li>
+          </ul>
+        </div>
+
+        <div class="block concept">
+          <h3>背后的 AI 概念</h3>
+          <p><strong>Tool Use / Function Calling</strong>：让 LLM 以"调用函数"形式拿到事实（价格、库存、用户画像）。我们这里是"Graph 层调度工具"，即 Graph 里某个节点主动调 tool，再把结果喂给下一个节点的 prompt；另一种是让 LLM 自主决定调用哪个工具（ReAct / OpenAI tools），第 5 章会提到。</p>
+        </div>
+
+        <div class="block practice">
+          <h3>动手练习</h3>
+          <ol>
+            <li>加一个 <code>inventory_tool</code>，在 commission 通过之后调用，把库存 &lt; 10 的商品也归入 <code>rejected</code>。涉及的改动点：新建 tool → <code>runtime.py</code> 装配 → <code>affiliate_graph.py</code> 加节点和边。</li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="chapter" id="ch-5">
+        <div class="chapter__tag">章节 5 · LangGraph</div>
+        <h2>StateGraph：把业务流从 if/else 搬到"图"里</h2>
+        <p class="chapter__lead">一句话：节点是一个个 Python 函数，边描述节点之间的跳转，<strong>状态</strong>沿着边流动。</p>
+
+        <div class="block">
+          <h3>对应代码</h3>
+          <p><code>python/graph/affiliate_graph.py</code></p>
+        </div>
+
+        <figure class="codecard">
+          <figcaption><code>python/graph/affiliate_graph.py</code> · L8-L28 · 状态定义</figcaption>
+          <pre><code>class AffiliateState(TypedDict, total=False):
+    session_id: str
+    product_url: str
+    product_text: str
+    platform: str
+    locale: str
+    style: str
+    min_commission_rate: float
+    enable_compression: bool
+    product_info: Dict[str, Any]
+    commission_rate: float
+    commission_ok: bool
+    retrieved_docs: List[Dict[str, Any]]
+    compressed_docs: List[Dict[str, Any]]
+    copy: Optional[Dict[str, Any]]
+    raw_output: str
+    rendered_prompt: str
+    result: Dict[str, Any]
+    tools: List[Dict[str, Any]]
+    trace: List[Dict[str, Any]]</code></pre>
+        </figure>
+
+        <figure class="codecard">
+          <figcaption><code>python/graph/affiliate_graph.py</code> · L130-L152 · 组装图</figcaption>
+          <pre><code>    workflow = StateGraph(AffiliateState)
+    workflow.add_node("normalize_input", normalize_input)
+    workflow.add_node("fetch_product_info", fetch_product_info)
+    workflow.add_node("check_commission", check_commission)
+    workflow.add_node("retrieve_policy_context", retrieve_policy_context)
+    workflow.add_node("generate_structured_copy", generate_structured_copy)
+    workflow.add_node("finalize_rejected", finalize_rejected)
+    workflow.add_node("finalize_accepted", finalize_accepted)
+    workflow.set_entry_point("normalize_input")
+    workflow.add_edge("normalize_input", "fetch_product_info")
+    workflow.add_edge("fetch_product_info", "check_commission")
+    workflow.add_conditional_edges(
+        "check_commission",
+        route_commission,
+        {
+            "rejected": "finalize_rejected",
+            "accepted": "retrieve_policy_context",
+        },
+    )</code></pre>
+        </figure>
+
+        <div class="block">
+          <h3>为什么这么写</h3>
+          <ul>
+            <li><strong>TypedDict 做状态</strong>：每个节点接收 state、返回增量 dict，LangGraph 自动合并。比纯 dict 多了类型提示，比 class 少了样板。</li>
+            <li><strong>条件边</strong>（<code>add_conditional_edges</code>）让业务规则显式：佣金没过 → 直接 <code>finalize_rejected</code>，过了 → 走检索 + 生成。</li>
+            <li><strong>Trace 就是状态的副产品</strong>：每个节点都往 <code>state["trace"]</code> 里追加，前端拿到整条链路，天然可观测。</li>
+          </ul>
+        </div>
+
+        <div class="block concept">
+          <h3>背后的 AI 概念</h3>
+          <p><strong>Agent = 带决策的状态机</strong>。LangGraph 的好处是"你画什么图就执行什么"，不像纯 LLM Agent 那样靠 prompt "骗"模型规划。本质上这是 <em>确定性业务流</em> 和 <em>LLM 生成</em> 的混合：流程由代码保证正确，生成部分由 LLM 负责创造性。</p>
+        </div>
+
+        <div class="block practice">
+          <h3>动手练习</h3>
+          <ol>
+            <li>加一个节点 <code>translate_copy</code>，接在 <code>generate_structured_copy</code> 之后，把生成的 <code>copy.title</code> 翻译到 <code>locale</code>。</li>
+            <li>把 <code>route_commission</code> 升级成"三叉"：<code>rejected / needs_review / accepted</code>，<code>needs_review</code> 分支走一个新节点 <code>request_manual_review</code>。</li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="chapter" id="ch-6">
+        <div class="chapter__tag">章节 6 · Go ↔ Python 桥</div>
+        <h2>子进程 + JSONL：最朴素的跨语言 RPC</h2>
+        <p class="chapter__lead">一句话：<strong>Go 启动 python3 子进程，双方把 JSON 塞到 stdin/stdout，一行一条消息</strong>。</p>
+
+        <div class="block">
+          <h3>对应代码</h3>
+          <ul>
+            <li><code>go/internal/worker/client.go</code> — Go 侧发请求、读响应、管生命周期</li>
+            <li><code>python/bridge/protocol.py</code> — Python 侧序列化 helper</li>
+            <li><code>python/main.py</code> — Python worker 的读-分发-写主循环</li>
+          </ul>
+        </div>
+
+        <figure class="codecard">
+          <figcaption><code>go/internal/worker/client.go</code> · L81-L121 · 发请求 / 读响应 / 超时</figcaption>
+          <pre><code>	line, err := json.Marshal(req)
+	if err != nil {
+		return Response{}, fmt.Errorf("marshal worker request: %w", err)
+	}
+	if _, err := c.stdin.Write(append(line, '\n')); err != nil {
+		return Response{}, fmt.Errorf("write worker request: %w", err)
+	}
+	type result struct {
+		resp Response
+		err  error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		replyLine, err := c.reader.ReadBytes('\n')
+		if err != nil {
+			resultCh &lt;- result{err: fmt.Errorf("read worker response: %w", err)}
+			return
+		}
+		var resp Response
+		if err := json.Unmarshal(replyLine, &amp;resp); err != nil {
+			resultCh &lt;- result{err: fmt.Errorf("decode worker response: %w", err)}
+			return
+		}
+		resultCh &lt;- result{resp: resp}
+	}()
+	var res result
+	select {
+	case &lt;-ctx.Done():
+		_ = c.Close()
+		return Response{}, ctx.Err()
+	case res = &lt;-resultCh:
+	}</code></pre>
+        </figure>
+
+        <div class="block">
+          <h3>为什么这么写</h3>
+          <ul>
+            <li><strong>一行一条 JSON</strong>：行分隔就是天然协议边界，不用写长度前缀或 protobuf。</li>
+            <li><strong>select + context</strong>：读 worker 响应放到 goroutine 里，主线程用 <code>select</code> 监听 <code>ctx.Done()</code>；超时就杀掉子进程，避免卡死。</li>
+            <li><strong>mu.Lock</strong>：保证同一时刻只有一个请求在往子进程写，简化 Python 侧的顺序处理。</li>
+          </ul>
+        </div>
+
+        <div class="block concept">
+          <h3>背后的工程概念</h3>
+          <p>严格说这是工程部分，不是 AI 概念，但它是本项目"能跑起来"的关键：真实生产里，AI 服务经常是一个独立的 Python 进程/容器，Go 侧做编排和接入层，同样的模式换成 gRPC / HTTP 都行，核心思想是<strong>隔离关注点、隔离依赖</strong>。</p>
+        </div>
+
+        <div class="block practice">
+          <h3>动手练习</h3>
+          <ol>
+            <li>把通信从 stdin/stdout 换成 HTTP：在 Python 侧用 FastAPI 暴露 <code>/call</code>，Go 侧用 <code>http.Client</code> 发请求。比较两种实现的启动时延、错误处理复杂度。</li>
+            <li>在 Go 侧加重试：Python 崩了自动重启 worker（需要改 <code>Start</code> 和 <code>Call</code>，捕获 stdin 写失败）。</li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="chapter" id="ch-7">
+        <div class="chapter__tag">章节 7 · 本地模型适配</div>
+        <h2>LocalModelAdapter：真模型接入的唯一点</h2>
+        <p class="chapter__lead">一句话：所有 LLM 调用走 <code>LocalModelAdapter</code>，当前是 mock，以后换真模型只动这一个文件。</p>
+
+        <div class="block">
+          <h3>对应代码</h3>
+          <p><code>python/llm/local_model.py</code></p>
+        </div>
+
+        <figure class="codecard">
+          <figcaption><code>python/llm/local_model.py</code> · L13-L37</figcaption>
+          <pre><code>    def generate_structured_copy(
+        self,
+        prompt: str,
+        product_info: dict,
+        platform: str,
+        locale: str,
+        style: str,
+        context_docs: list[str],
+    ) -&gt; tuple[str, AffiliateCopy]:
+        title = product_info.get("title", "Untitled Product")
+        highlights = list(product_info.get("highlights", []))
+        while len(highlights) &lt; 3:
+            highlights.append(f"Reliable value for {platform} shoppers")
+
+        localized_hook = self._localized_hook(locale, style)
+        risk_notes = ["Avoid exaggerated claims", "Use real product benefits only"]</code></pre>
+        </figure>
+
+        <div class="block">
+          <h3>为什么这么写</h3>
+          <ul>
+            <li><strong>接口稳定</strong>：签名固定是 <code>(prompt, product_info, ...) -&gt; (raw_output, AffiliateCopy)</code>，换真模型只需要保证这个契约。</li>
+            <li><strong>mode 开关</strong>：<code>Runtime</code> 通过环境变量 <code>AFFILIATE_MODEL_MODE</code> 决定走 mock 还是真模型（见 <code>bridge/runtime.py</code> L32-L35）。</li>
+            <li><strong>deterministic mock</strong>：mock 的输出跟输入有稳定关系，方便写单元测试（见 <code>python/tests/test_prompt_lab.py</code>）。</li>
+          </ul>
+        </div>
+
+        <div class="block concept">
+          <h3>背后的 AI 概念</h3>
+          <p><strong>模型抽象层</strong>是任何要上生产的 AI 系统必备的：方便切换供应商（OpenAI/本地/Claude）、做降级兜底、做测试桩。<code>LocalModelAdapter</code> 就是这个抽象最小实现。</p>
+        </div>
+
+        <div class="block practice">
+          <h3>动手练习</h3>
+          <ol>
+            <li>把 <code>mode == "ollama"</code> 分支实现出来：内部用 <code>ollama</code> 的 HTTP API 调本机模型，拿到原始文本后 <code>json.loads</code> 再 <code>AffiliateCopy.model_validate</code>。</li>
+            <li>在 adapter 里加一个简单的 LRU 缓存：相同 prompt 直接复用结果，能显著降低调试期的响应延迟。</li>
+            <li>进一步：把 <code>generate_structured_copy</code> 的内部实现切成"先让 LLM 自由生成 → 再用 Pydantic 校验 → 失败时降级到规则"。</li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="chapter" id="ch-8">
+        <div class="chapter__tag">章节 8 · 实战路径</div>
+        <h2>按这个顺序练，概念就能和代码对上</h2>
+        <p class="chapter__lead">不推荐一上来就跳到某一章改，按下面的顺序练，你会自然地把整条 AI 编排的肌肉记起来。</p>
+
+        <div class="block roadmap">
+          <ol class="roadmap__list">
+            <li>
+              <strong>第 1 步 · 跑通全链路</strong>
+              <p>打开 Studio → 运行 → 对着 <code>trace</code> 一个个节点看。目标：把第 0 章的时序图亲手走一遍。</p>
+            </li>
+            <li>
+              <strong>第 2 步 · 改 Prompt 和 Schema</strong>
+              <p>到第 1、2 章的练习：改一句 system prompt、加一个字段。体会"结构化输出"为啥比让 LLM 自由发挥稳。</p>
+            </li>
+            <li>
+              <strong>第 3 步 · 加一个 Tool</strong>
+              <p>第 4 章：新建 <code>inventory_tool</code>，从 fixture 查库存。重点练"tool 失败要抛结构化异常，不是 return 默认值"。</p>
+            </li>
+            <li>
+              <strong>第 4 步 · 改图：加节点 + 加条件边</strong>
+              <p>第 5 章：把 <code>inventory_tool</code> 的结果做成新节点接在 <code>check_commission</code> 之后，并加第三个分支 <code>needs_review</code>。</p>
+            </li>
+            <li>
+              <strong>第 5 步 · 换真 RAG</strong>
+              <p>第 3 章：把 <code>KeywordRetriever</code> 换成 <code>sentence-transformers</code> + Chroma。接口保持不变是关键。</p>
+            </li>
+            <li>
+              <strong>第 6 步 · 换真模型</strong>
+              <p>第 7 章：实现 <code>LocalModelAdapter</code> 的真实分支（Ollama / transformers）。这一步做完你就有了一个完全本地的 affiliate AI。</p>
+            </li>
+            <li>
+              <strong>第 7 步 · 可选：做真 Agent</strong>
+              <p>把某个节点换成"让 LLM 自己决定调哪个 tool" —— 就是从 LangGraph 的确定性图，升级到 ReAct / tool-calling agent。</p>
+            </li>
+          </ol>
+        </div>
+
+        <div class="block">
+          <h3>学习资源对照</h3>
+          <table class="fileref">
+            <thead><tr><th>你想学</th><th>读我们代码的哪里</th><th>外部扩展</th></tr></thead>
+            <tbody>
+              <tr><td>Prompt 工程</td><td><code>python/labs/prompt_lab.py</code></td><td>LangChain ChatPromptTemplate 文档</td></tr>
+              <tr><td>结构化输出</td><td><code>python/schemas/models.py</code></td><td>Pydantic v2、OpenAI function calling</td></tr>
+              <tr><td>RAG</td><td><code>python/rag/*</code></td><td>LangChain Retriever、Chroma、BGE/E5 embedding</td></tr>
+              <tr><td>Tool 调用</td><td><code>python/tools/*</code></td><td>LangChain Tool、ReAct 论文</td></tr>
+              <tr><td>Agent 编排</td><td><code>python/graph/affiliate_graph.py</code></td><td>LangGraph 官方示例（chat_agent_executor）</td></tr>
+              <tr><td>工程架构</td><td><code>go/internal/worker/client.go</code></td><td>gRPC、FastAPI、子进程模型</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer class="learn-footer">
+        <p>写完这一页时，你已经把 LangChain / LangGraph PDF 里提到的所有核心概念都在一条真实业务流里碰过一遍。</p>
+        <p><a href="/studio">← 回到 Studio 继续实验</a></p>
+      </footer>
+
+    </main>
+  </div>
+
+  <script src="/static/learn.js"></script>
+</body>
+</html>

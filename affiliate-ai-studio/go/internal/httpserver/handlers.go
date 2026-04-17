@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"html/template"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -39,8 +40,19 @@ func (h *Handler) StudioPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = h.tmpl.Execute(w, map[string]any{
+	_ = h.tmpl.ExecuteTemplate(w, "studio.html", map[string]any{
 		"Title": "Affiliate AI Studio",
+	})
+}
+
+func (h *Handler) LearnPage(w http.ResponseWriter, r *http.Request) {
+	if h.tmpl == nil {
+		http.Error(w, "template not configured", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_ = h.tmpl.ExecuteTemplate(w, "learn.html", map[string]any{
+		"Title": "Learn · Affiliate AI Studio",
 	})
 }
 
@@ -71,11 +83,23 @@ func (h *Handler) RunAffiliateFlow(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, context.DeadlineExceeded) {
 			code = "worker_error"
 		}
+		workerMsg := ""
+		if resp.Error != nil {
+			workerMsg = resp.Error.Message
+		}
+		log.Printf(
+			"run_affiliate_flow error session=%s code=%s product_url=%q product_text_len=%d err=%v worker_msg=%q",
+			sessionID, code, req.ProductURL, len(req.ProductText), err, workerMsg,
+		)
 		writeAPIError(w, http.StatusBadGateway, code, err.Error())
 		return
 	}
 	view, err := viewmodel.FromWorkerResponse(sessionID, resp)
 	if err != nil {
+		log.Printf(
+			"run_affiliate_flow decode error session=%s err=%v raw=%s",
+			sessionID, err, string(resp.Data),
+		)
 		writeAPIError(w, http.StatusBadGateway, "worker_error", "invalid worker response")
 		return
 	}
