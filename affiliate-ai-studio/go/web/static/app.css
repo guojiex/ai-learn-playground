@@ -77,6 +77,33 @@ button {
   cursor: pointer;
 }
 
+button:hover {
+  background: #7aa2ff;
+}
+
+.button-secondary {
+  background: transparent;
+  border: 1px solid #34405e;
+  color: #c8d7ff;
+}
+
+.button-secondary:hover {
+  background: rgba(91, 140, 255, 0.12);
+}
+
+.form-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.form-hint {
+  margin: 0;
+  font-size: 12px;
+  color: #8391ad;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));

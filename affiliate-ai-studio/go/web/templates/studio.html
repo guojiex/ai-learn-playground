@@ -46,7 +46,11 @@
           <input name="enable_compression" type="checkbox" checked>
           启用压缩检索
         </label>
-        <button type="submit">运行完整流程</button>
+        <div class="form-actions">
+          <button type="submit">运行完整流程</button>
+          <button type="button" id="reset-form" class="button-secondary">重置为默认值</button>
+        </div>
+        <p class="form-hint">表单内容会自动保存在当前浏览器，下次打开会自动回填。</p>
       </form>
     </section>
 
