@@ -4,3 +4,12 @@ __pycache__/
 .pytest_cache/
 go/bin/
 var/
+
+# web-studio (React + Vite)
+web-studio/node_modules/
+web-studio/dist/
+web-studio/.vite/
+web-studio/coverage/
+
+# Vite build output (served by Go)
+go/web/static/dist/
