@@ -1,0 +1,40 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Affiliate Studio: Run",
+      "type": "shell",
+      "command": "./scripts/start.sh",
+      "options": {
+        "cwd": "${workspaceFolder}/affiliate-ai-studio"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      },
+      "problemMatcher": [
+        {
+          "pattern": [
+            {
+              "regexp": "^$",
+              "file": 1,
+              "location": 2,
+              "message": 3
+            }
+          ],
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": "^\\[start\\] launching Go web server",
+            "endsPattern": "^.*Affiliate AI Studio listening.*$"
+          }
+        }
+      ]
+    }
+  ]
+}
