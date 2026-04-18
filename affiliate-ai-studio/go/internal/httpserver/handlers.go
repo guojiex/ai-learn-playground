@@ -11,12 +11,23 @@ import (
 	"time"
 
 	"ai-learn-playground/affiliate-ai-studio/go/internal/app"
+	"ai-learn-playground/affiliate-ai-studio/go/internal/assets"
 	"ai-learn-playground/affiliate-ai-studio/go/internal/viewmodel"
 )
+
+// ViteConfig 控制 studio.html 里前端资源的注入方式。
+// DevMode 为 true 时直连 Vite dev server（通过 DevServerURL），否则从 Manifest 读 build 产物。
+type ViteConfig struct {
+	DevMode       bool
+	DevServerURL  string // 例如 "http://localhost:5173"
+	EntryModule   string // 例如 "/src/main.tsx"
+	Manifest      *assets.Manifest
+}
 
 type Handler struct {
 	app  *app.App
 	tmpl *template.Template
+	vite ViteConfig
 }
 
 type RunAffiliateRequest struct {
@@ -34,15 +45,49 @@ func NewHandler(application *app.App, tmpl *template.Template) *Handler {
 	return &Handler{app: application, tmpl: tmpl}
 }
 
+// WithVite 注入前端资源配置（可选）。未调用时 StudioPage 会回落到老 vanilla 模板行为，
+// 便于纯 Go 单测覆盖。
+func (h *Handler) WithVite(cfg ViteConfig) *Handler {
+	h.vite = cfg
+	return h
+}
+
 func (h *Handler) StudioPage(w http.ResponseWriter, r *http.Request) {
 	if h.tmpl == nil {
 		http.Error(w, "template not configured", http.StatusInternalServerError)
 		return
 	}
+
+	data := map[string]any{
+		"Title":   "Affiliate AI Studio",
+		"DevMode": h.vite.DevMode,
+	}
+
+	if h.vite.DevMode {
+		base := strings.TrimRight(h.vite.DevServerURL, "/")
+		entry := h.vite.EntryModule
+		if entry == "" {
+			entry = "/src/main.tsx"
+		}
+		data["DevClientSrc"] = base + "/@vite/client"
+		data["DevEntrySrc"] = base + entry
+	} else if h.vite.Manifest != nil {
+		entry, err := h.vite.Manifest.Resolve()
+		if err != nil {
+			log.Printf("studio page asset manifest error: %v", err)
+			http.Error(w,
+				"前端资源未就绪：请先在 web-studio 目录下运行 `npm install && npm run build`，或设置环境变量 AFFILIATE_STUDIO_DEV=1 走本地 Vite dev",
+				http.StatusInternalServerError)
+			return
+		}
+		data["JSFile"] = entry.File
+		if len(entry.CSS) > 0 {
+			data["CSSFiles"] = entry.CSS
+		}
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = h.tmpl.ExecuteTemplate(w, "studio.html", map[string]any{
-		"Title": "Affiliate AI Studio",
-	})
+	_ = h.tmpl.ExecuteTemplate(w, "studio.html", data)
 }
 
 func (h *Handler) LearnPage(w http.ResponseWriter, r *http.Request) {

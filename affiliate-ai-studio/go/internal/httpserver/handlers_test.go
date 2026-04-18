@@ -7,18 +7,42 @@ import (
 	"html/template"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"ai-learn-playground/affiliate-ai-studio/go/internal/app"
+	"ai-learn-playground/affiliate-ai-studio/go/internal/assets"
 	"ai-learn-playground/affiliate-ai-studio/go/internal/worker"
 )
 
+const studioTemplate = `<html><head><title>{{ .Title }}</title>
+{{ if .DevMode }}<script src="{{ .DevEntrySrc }}"></script>
+{{ else }}
+  {{ range .CSSFiles }}<link rel="stylesheet" href="/static/dist{{ . }}" />{{ end }}
+  <script type="module" src="/static/dist{{ .JSFile }}"></script>
+{{ end }}
+</head><body><div id="root"></div></body></html>`
+
 func newTestTemplate(t *testing.T) *template.Template {
 	t.Helper()
-	tmpl := template.Must(template.New("studio.html").Parse(`<html><body>Affiliate AI Studio</body></html>`))
+	tmpl := template.Must(template.New("studio.html").Parse(studioTemplate))
 	template.Must(tmpl.New("learn.html").Parse(`<html><body>Learn AI Together</body></html>`))
 	return tmpl
+}
+
+func writeManifest(t *testing.T, data string) *assets.Manifest {
+	t.Helper()
+	dir := t.TempDir()
+	viteDir := filepath.Join(dir, ".vite")
+	if err := os.MkdirAll(viteDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(viteDir, "manifest.json"), []byte(data), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	return assets.NewManifest(dir, "src/main.tsx")
 }
 
 type stubWorker struct {
@@ -39,18 +63,72 @@ func (s stubWorker) Close() error {
 	return nil
 }
 
-func TestStudioPageRenders(t *testing.T) {
+func TestStudioPageRendersWithManifest(t *testing.T) {
+	manifest := writeManifest(t, `{
+		"src/main.tsx": {
+			"file": "assets/main-abc.js",
+			"css": ["assets/main-xyz.css"]
+		}
+	}`)
+
 	req := httptest.NewRequest(http.MethodGet, "/studio", nil)
 	rec := httptest.NewRecorder()
 
-	handler := NewHandler(nil, newTestTemplate(t))
+	handler := NewHandler(nil, newTestTemplate(t)).
+		WithVite(ViteConfig{Manifest: manifest})
+	handler.StudioPage(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "Affiliate AI Studio") {
+		t.Fatalf("expected title, got %q", body)
+	}
+	if !strings.Contains(body, "/static/dist/assets/main-abc.js") {
+		t.Fatalf("expected hashed JS, got %q", body)
+	}
+	if !strings.Contains(body, "/static/dist/assets/main-xyz.css") {
+		t.Fatalf("expected hashed CSS, got %q", body)
+	}
+}
+
+func TestStudioPageDevModeUsesViteDevServer(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/studio", nil)
+	rec := httptest.NewRecorder()
+
+	handler := NewHandler(nil, newTestTemplate(t)).
+		WithVite(ViteConfig{
+			DevMode:      true,
+			DevServerURL: "http://localhost:5173",
+			EntryModule:  "/src/main.tsx",
+		})
 	handler.StudioPage(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "Affiliate AI Studio") {
-		t.Fatalf("expected studio page content, got %q", rec.Body.String())
+	body := rec.Body.String()
+	if !strings.Contains(body, "http://localhost:5173/src/main.tsx") {
+		t.Fatalf("expected vite dev server src, got %q", body)
+	}
+}
+
+func TestStudioPageMissingManifestReturns500(t *testing.T) {
+	manifest := assets.NewManifest(t.TempDir(), "src/main.tsx")
+
+	req := httptest.NewRequest(http.MethodGet, "/studio", nil)
+	rec := httptest.NewRecorder()
+
+	handler := NewHandler(nil, newTestTemplate(t)).
+		WithVite(ViteConfig{Manifest: manifest})
+	handler.StudioPage(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "npm run build") {
+		t.Fatalf("expected hint in body, got %q", rec.Body.String())
 	}
 }
 
