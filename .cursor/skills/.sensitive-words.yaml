@@ -1,0 +1,34 @@
+# 敏感词配置，被 .cursor/skills/scripts/check-sensitive.sh 读取。
+#
+# 三段结构：
+#   words     —— 精确词，大小写不敏感，使用单词边界匹配（避免 shopee 误命中 shopeesafe 以外的情况由正则覆盖）
+#   patterns  —— 扩展正则（ERE），grep -E 直接可用
+#   allowlist —— 字符串，命中行里如同时包含 allowlist 任一条目则视为白名单放行
+#
+# 维护原则：
+#   1. 添加新敏感词时，先确认它不会大量误伤（在 .cursor/skills/ 下 grep 一下）
+#   2. 只在确认是"代称占位符 / 合法引用"时才加 allowlist，不要滥用
+#   3. 修改后手动跑一遍：bash .cursor/skills/scripts/check-sensitive.sh
+
+# 精确词（大小写不敏感，单词边界匹配）
+words:
+  - Minna
+  - jiexin
+  - jialie
+  - yangliu
+  - shopee
+
+# 扩展正则（ERE 语法）
+patterns:
+  - "SPAN-[0-9]+"
+  - "https?://[a-zA-Z0-9.-]*shopee[^ )]*"
+  - "LUPLL[A-Za-z0-9_-]+"
+
+# 白名单片段：命中行若包含任一片段则放行
+# 注意：allowlist 是按「行级」判断，不是按「片段精确替换」。
+# 比如允许 "QA_Gatekeeper" 是因为它作为代称存在，不含任何敏感词，所以这里其实也无需加。
+# 仅当你有类似"shopee-corp-official"这种合法组合时再加。
+allowlist:
+  - "<AI 战略代号>"
+  - "<QA_Gatekeeper>"
+  - "<某高层 / 某战略代号>"
