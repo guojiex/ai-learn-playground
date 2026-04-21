@@ -1,10 +1,12 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   Background,
   BackgroundVariant,
   Controls,
   MarkerType,
   ReactFlow,
+  useNodesInitialized,
+  useReactFlow,
   type Edge,
   type NodeTypes,
 } from "@xyflow/react";
@@ -20,6 +22,26 @@ import { GraphNode, type GraphFlowNode } from "./nodes/GraphNode";
 const nodeTypes: NodeTypes = {
   graphNode: GraphNode as unknown as NodeTypes[string],
 };
+
+const FIT_VIEW_OPTIONS = { padding: 0.2, duration: 0 } as const;
+
+/**
+ * 在自定义节点尚未被测量宽高时调用 fitView，会把内容框算得过小，
+ * 视口缩放异常，节点看起来「全挤在一起」。等节点初始化后再 fit 一次即可。
+ */
+function FitViewWhenNodesMeasured() {
+  const { fitView } = useReactFlow();
+  const nodesReady = useNodesInitialized();
+  const didFit = useRef(false);
+
+  useEffect(() => {
+    if (!nodesReady || didFit.current) return;
+    didFit.current = true;
+    fitView(FIT_VIEW_OPTIONS);
+  }, [fitView, nodesReady]);
+
+  return null;
+}
 
 export function GraphCanvas() {
   const response = useRunStore((s) => s.response);
@@ -109,8 +131,6 @@ export function GraphCanvas() {
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
-        fitView
-        fitViewOptions={{ padding: 0.2 }}
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable
@@ -118,6 +138,7 @@ export function GraphCanvas() {
         onNodeClick={(_, node) => selectNode(node.id)}
         onPaneClick={() => selectNode(null)}
       >
+        <FitViewWhenNodesMeasured />
         <Background
           variant={BackgroundVariant.Dots}
           gap={18}
