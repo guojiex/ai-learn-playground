@@ -78,7 +78,7 @@ export const GraphNode = memo(function GraphNode(
   return (
     <div
       className={[
-        "group min-w-[180px] cursor-pointer rounded-xl border px-3 py-2.5 shadow-sm transition",
+        "group min-w-[180px] max-w-[280px] cursor-pointer rounded-xl border px-3 py-2.5 shadow-sm transition",
         statusStyle,
         selected ? "ring-2 ring-primary" : "",
       ].join(" ")}
