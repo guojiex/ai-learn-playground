@@ -6,12 +6,18 @@ import {
   MarkerType,
   ReactFlow,
   useNodesInitialized,
+  useNodesState,
   useReactFlow,
   type Edge,
   type NodeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useRunStore } from "@/store/runStore";
+import {
+  LAYOUT_NODE_HEIGHT,
+  LAYOUT_NODE_WIDTH,
+  layoutNodesWithDagre,
+} from "./dagreLayout";
 import { GRAPH_EDGES, GRAPH_NODES } from "./graphDefinition";
 import {
   useNodeStates,
@@ -24,6 +30,25 @@ const nodeTypes: NodeTypes = {
 };
 
 const FIT_VIEW_OPTIONS = { padding: 0.2, duration: 0 } as const;
+
+function buildInitialFlowNodes(): GraphFlowNode[] {
+  const positions = layoutNodesWithDagre(GRAPH_NODES, GRAPH_EDGES);
+  return GRAPH_NODES.map((spec) => ({
+    id: spec.id,
+    type: "graphNode",
+    position: positions[spec.id] ?? { x: 0, y: 0 },
+    width: LAYOUT_NODE_WIDTH,
+    height: LAYOUT_NODE_HEIGHT,
+    data: {
+      label: spec.label,
+      kind: spec.kind,
+      variant: spec.variant,
+      status: "idle",
+      description: spec.description,
+    },
+    selected: false,
+  }));
+}
 
 /**
  * 在自定义节点尚未被测量宽高时调用 fitView，会把内容框算得过小，
@@ -49,26 +74,36 @@ export function GraphCanvas() {
   const selectNode = useRunStore((s) => s.selectNode);
   const nodeStates = useNodeStates();
 
+  const initialNodesRef = useRef<GraphFlowNode[] | null>(null);
+  if (initialNodesRef.current === null) {
+    initialNodesRef.current = buildInitialFlowNodes();
+  }
+  const [nodes, setNodes, onNodesChange] = useNodesState<GraphFlowNode>(
+    initialNodesRef.current,
+  );
+
   useTraceAnimator(response);
 
-  const nodes = useMemo<GraphFlowNode[]>(() => {
-    return GRAPH_NODES.map((spec) => {
-      const state = nodeStates[spec.id];
-      return {
-        id: spec.id,
-        type: "graphNode",
-        position: spec.position,
-        data: {
-          label: spec.label,
-          kind: spec.kind,
-          variant: spec.variant,
-          status: state?.status ?? "idle",
-          description: spec.description,
-        },
-        selected: selectedNode === spec.id,
-      };
-    });
-  }, [nodeStates, selectedNode]);
+  useEffect(() => {
+    setNodes((nds) =>
+      nds.map((n) => {
+        const spec = GRAPH_NODES.find((s) => s.id === n.id);
+        if (!spec) return n;
+        const state = nodeStates[spec.id];
+        return {
+          ...n,
+          data: {
+            label: spec.label,
+            kind: spec.kind,
+            variant: spec.variant,
+            status: state?.status ?? "idle",
+            description: spec.description,
+          },
+          selected: selectedNode === spec.id,
+        };
+      }),
+    );
+  }, [nodeStates, selectedNode, setNodes]);
 
   const edges = useMemo<Edge[]>(() => {
     const decision = response?.result?.decision ?? null;
@@ -131,7 +166,8 @@ export function GraphCanvas() {
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
-        nodesDraggable={false}
+        onNodesChange={onNodesChange}
+        nodesDraggable
         nodesConnectable={false}
         elementsSelectable
         proOptions={{ hideAttribution: true }}

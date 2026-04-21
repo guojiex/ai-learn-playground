@@ -10,11 +10,6 @@ export interface GraphNodeSpec {
   traceKey: string;
   /** 若该节点会产生一个 tool call，在这里给出 tool 名（用于在详情抽屉里匹配） */
   tool?: string;
-  /**
-   * UI 位置（React Flow x/y），手工排布。
-   * 间距需 ≥ 节点 max-width + 边距（见 GraphNode），否则长文案会把卡片撑宽后重叠。
-   */
-  position: { x: number; y: number };
   /** 简短说明，用于鼠标悬浮提示 */
   description: string;
 }
@@ -34,7 +29,6 @@ export const GRAPH_NODES: GraphNodeSpec[] = [
     label: "Normalize",
     kind: "step",
     traceKey: "normalize_input",
-    position: { x: 0, y: 200 },
     description: "整理入参（URL / 描述 / 平台 / 语言 / 风格）",
   },
   {
@@ -43,7 +37,6 @@ export const GRAPH_NODES: GraphNodeSpec[] = [
     kind: "step",
     traceKey: "fetch_product_info",
     tool: "fetch_product_info",
-    position: { x: 360, y: 200 },
     description: "调用商品查询工具，未命中时返回 fallback fixture",
   },
   {
@@ -52,7 +45,6 @@ export const GRAPH_NODES: GraphNodeSpec[] = [
     kind: "decision",
     traceKey: "check_commission",
     tool: "check_commission",
-    position: { x: 720, y: 200 },
     description: "比对佣金率与阈值，决定 accepted / rejected",
   },
   {
@@ -61,7 +53,6 @@ export const GRAPH_NODES: GraphNodeSpec[] = [
     kind: "step",
     traceKey: "retrieve_policy_context",
     tool: "search_policy_kb",
-    position: { x: 1120, y: 40 },
     description: "从政策知识库检索证据并（可选）压缩",
   },
   {
@@ -69,7 +60,6 @@ export const GRAPH_NODES: GraphNodeSpec[] = [
     label: "Generate Copy",
     kind: "llm",
     traceKey: "generate_structured_copy",
-    position: { x: 1500, y: 40 },
     description: "调 Prompt + LLM 生成结构化营销文案",
   },
   {
@@ -78,7 +68,6 @@ export const GRAPH_NODES: GraphNodeSpec[] = [
     kind: "terminal",
     variant: "ok",
     traceKey: "finalize_accepted",
-    position: { x: 1880, y: 40 },
     description: "组装 accepted 响应",
   },
   {
@@ -87,7 +76,6 @@ export const GRAPH_NODES: GraphNodeSpec[] = [
     kind: "terminal",
     variant: "error",
     traceKey: "finalize_rejected",
-    position: { x: 820, y: 380 },
     description: "佣金不达标，跳过生成，直接拒绝",
   },
 ];
