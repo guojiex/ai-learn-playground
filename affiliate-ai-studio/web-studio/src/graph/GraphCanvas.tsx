@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   Background,
   BackgroundVariant,
@@ -9,6 +9,7 @@ import {
   useNodesState,
   useReactFlow,
   type Edge,
+  type NodeMouseHandler,
   type NodeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -18,7 +19,11 @@ import {
   LAYOUT_NODE_WIDTH,
   layoutNodesWithDagre,
 } from "./dagreLayout";
-import { GRAPH_EDGES, GRAPH_NODES } from "./graphDefinition";
+import {
+  GRAPH_EDGES,
+  GRAPH_NODE_BY_ID,
+  GRAPH_NODES,
+} from "./graphDefinition";
 import {
   useNodeStates,
   useTraceAnimator,
@@ -30,6 +35,8 @@ const nodeTypes: NodeTypes = {
 };
 
 const FIT_VIEW_OPTIONS = { padding: 0.2, duration: 0 } as const;
+
+const PRO_OPTIONS = { hideAttribution: true } as const;
 
 function buildInitialFlowNodes(): GraphFlowNode[] {
   const positions = layoutNodesWithDagre(GRAPH_NODES, GRAPH_EDGES);
@@ -74,36 +81,43 @@ export function GraphCanvas() {
   const selectNode = useRunStore((s) => s.selectNode);
   const nodeStates = useNodeStates();
 
-  const initialNodesRef = useRef<GraphFlowNode[] | null>(null);
-  if (initialNodesRef.current === null) {
-    initialNodesRef.current = buildInitialFlowNodes();
-  }
-  const [nodes, setNodes, onNodesChange] = useNodesState<GraphFlowNode>(
-    initialNodesRef.current,
-  );
+  const initialNodes = useMemo(() => buildInitialFlowNodes(), []);
+  const [nodes, setNodes, onNodesChange] =
+    useNodesState<GraphFlowNode>(initialNodes);
 
   useTraceAnimator(response);
 
   useEffect(() => {
-    setNodes((nds) =>
-      nds.map((n) => {
-        const spec = GRAPH_NODES.find((s) => s.id === n.id);
-        if (!spec) return n;
-        const state = nodeStates[spec.id];
+    setNodes((nds) => {
+      let changed = false;
+      const next = nds.map((n) => {
+        if (!GRAPH_NODE_BY_ID.has(n.id)) return n;
+        const nextStatus = nodeStates[n.id]?.status ?? "idle";
+        const nextSelected = selectedNode === n.id;
+        if (n.data.status === nextStatus && n.selected === nextSelected) {
+          return n;
+        }
+        changed = true;
         return {
           ...n,
-          data: {
-            label: spec.label,
-            kind: spec.kind,
-            variant: spec.variant,
-            status: state?.status ?? "idle",
-            description: spec.description,
-          },
-          selected: selectedNode === spec.id,
+          data: { ...n.data, status: nextStatus },
+          selected: nextSelected,
         };
-      }),
-    );
+      });
+      return changed ? next : nds;
+    });
   }, [nodeStates, selectedNode, setNodes]);
+
+  const handleNodeClick = useCallback<NodeMouseHandler<GraphFlowNode>>(
+    (_, node) => {
+      selectNode(node.id);
+    },
+    [selectNode],
+  );
+
+  const handlePaneClick = useCallback(() => {
+    selectNode(null);
+  }, [selectNode]);
 
   const edges = useMemo<Edge[]>(() => {
     const decision = response?.result?.decision ?? null;
@@ -170,9 +184,9 @@ export function GraphCanvas() {
         nodesDraggable
         nodesConnectable={false}
         elementsSelectable
-        proOptions={{ hideAttribution: true }}
-        onNodeClick={(_, node) => selectNode(node.id)}
-        onPaneClick={() => selectNode(null)}
+        proOptions={PRO_OPTIONS}
+        onNodeClick={handleNodeClick}
+        onPaneClick={handlePaneClick}
       >
         <FitViewWhenNodesMeasured />
         <Background

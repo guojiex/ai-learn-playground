@@ -21,7 +21,6 @@ export interface GraphNodeData extends Record<string, unknown> {
   variant?: GraphNodeVariant;
   status: NodeVisualStatus;
   description: string;
-  selected?: boolean;
 }
 
 const STATUS_STYLES: Record<NodeVisualStatus, string> = {

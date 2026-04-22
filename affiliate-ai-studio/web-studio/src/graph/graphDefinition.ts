@@ -109,6 +109,11 @@ export const GRAPH_EDGES: GraphEdgeSpec[] = [
   },
 ];
 
+/** O(1) 查找，避免在动画循环里对每条边 / 每个节点反复 `find` */
+export const GRAPH_NODE_BY_ID: ReadonlyMap<string, GraphNodeSpec> = new Map(
+  GRAPH_NODES.map((n) => [n.id, n]),
+);
+
 export function findNodeSpec(id: string): GraphNodeSpec | undefined {
-  return GRAPH_NODES.find((n) => n.id === id);
+  return GRAPH_NODE_BY_ID.get(id);
 }
