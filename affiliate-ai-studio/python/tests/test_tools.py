@@ -27,6 +27,19 @@ def test_lookup_commission_returns_rate() -> None:
     assert tool.lookup("power-bank-10000") == 0.18
 
 
+def test_lookup_commission_unknown_product_uses_mock_default() -> None:
+    tool = CommissionLookupTool(rates={"power-bank-10000": 0.18})
+
+    assert tool.lookup("fallback-unknown") == 0.15
+    assert tool.lookup("any-unlisted-sku") == 0.15
+
+
+def test_lookup_commission_custom_mock_default() -> None:
+    tool = CommissionLookupTool(rates={}, default_mock_rate=0.08)
+
+    assert tool.lookup("x") == 0.08
+
+
 def test_lookup_product_returns_fallback_when_not_found() -> None:
     tool = ProductLookupTool(fixtures=_sample_fixtures())
 
