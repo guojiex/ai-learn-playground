@@ -58,9 +58,10 @@ else
 fi
 
 open_browser() {
-  for _ in $(seq 1 40); do
-    if curl -fs "http://127.0.0.1:${PORT}/healthz" >/dev/null 2>&1; then
-      echo "[start] server is up, opening ${URL}"
+  echo "[start] waiting for worker warmup (model loading) …"
+  for _ in $(seq 1 240); do
+    if curl -fs "http://127.0.0.1:${PORT}/readyz" | grep -q '"ok"' 2>/dev/null; then
+      echo "[start] worker ready, opening ${URL}"
       if command -v open >/dev/null 2>&1; then
         open "$URL" || true
       elif command -v xdg-open >/dev/null 2>&1; then
@@ -68,9 +69,9 @@ open_browser() {
       fi
       return
     fi
-    sleep 0.25
+    sleep 0.5
   done
-  echo "[start] server did not become ready in time; open ${URL} manually"
+  echo "[start] worker did not become ready in 120s; open ${URL} manually"
 }
 
 echo "[start] building frontend (web-studio)..."

@@ -68,19 +68,33 @@ func Start(ctx context.Context, pythonDir string) (*Client, error) {
 	}
 	go pipeWorkerStderr(stderr)
 
-	return &Client{
+	c := &Client{
 		cmd:    cmd,
 		stdin:  stdin,
 		reader: bufio.NewReader(stdout),
-		ready:  true,
-	}, nil
+		ready:  false,
+	}
+
+	log.Println("worker: waiting for Python warmup (ping) …")
+	pingReq := Request{Action: "ping", SessionID: "warmup"}
+	if _, err := c.callInternal(ctx, pingReq); err != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("worker warmup ping failed: %w", err)
+	}
+	c.ready = true
+	log.Println("worker: ready")
+
+	return c, nil
 }
 
 func (c *Client) Call(ctx context.Context, req Request) (Response, error) {
 	if !c.ready {
 		return Response{}, errors.New("worker is not ready")
 	}
+	return c.callInternal(ctx, req)
+}
 
+func (c *Client) callInternal(ctx context.Context, req Request) (Response, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
