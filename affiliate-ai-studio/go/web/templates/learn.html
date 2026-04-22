@@ -30,7 +30,7 @@
         <li><a href="#ch-4" data-chapter="ch-4">4 · Tools · 让 LLM 查外部数据</a></li>
         <li><a href="#ch-5" data-chapter="ch-5">5 · LangGraph · 状态机编排</a></li>
         <li><a href="#ch-6" data-chapter="ch-6">6 · Go ↔ Python 桥 · 进程间 JSONL</a></li>
-        <li><a href="#ch-7" data-chapter="ch-7">7 · LocalModelAdapter · 真假模型切换点</a></li>
+        <li><a href="#ch-7" data-chapter="ch-7">7 · LocalModelAdapter · 本地 Qwen 推理</a></li>
         <li><a href="#ch-8" data-chapter="ch-8">8 · 实战路径 · 按顺序怎么练</a></li>
       </ol>
       <div class="learn-sidebar__tip">
@@ -160,7 +160,7 @@
         <div class="block practice">
           <h3>动手练习</h3>
           <ol>
-            <li>把 system 里的"affiliate copywriting assistant"改成"严谨的电商合规审核员"，再跑一次，看 <code>result.copy.risk_notes</code> 有没有变化（注意：当前 mock 模型不会真的响应，但渲染的 prompt 会变——这就是分层调试的意义）。</li>
+            <li>把 system 里的"affiliate copywriting assistant"改成"严谨的电商合规审核员"，再跑一次，看 <code>result.copy.risk_notes</code> 有没有变化。真实 Qwen 模型会根据 system prompt 调整输出风格。</li>
             <li>给 prompt 加一个 few-shot 示例，试试在 <code>from_messages</code> 列表里加 <code>("human", "...")</code>、<code>("ai", "...")</code>。</li>
           </ol>
         </div>
@@ -491,54 +491,67 @@ class AffiliateDecision(BaseModel):
 
       <section class="chapter" id="ch-7">
         <div class="chapter__tag">章节 7 · 本地模型适配</div>
-        <h2>LocalModelAdapter：真模型接入的唯一点</h2>
-        <p class="chapter__lead">一句话：所有 LLM 调用走 <code>LocalModelAdapter</code>，当前是 mock，以后换真模型只动这一个文件。</p>
+        <h2>LocalModelAdapter：从 Mock 到真实 Qwen 推理</h2>
+        <p class="chapter__lead">一句话：<strong>默认直接调 Qwen1.5-1.8B-Chat 做本地推理</strong>，模型首次加载约需下载 3.6GB 权重，之后缓存在 HuggingFace cache 里。</p>
 
         <div class="block">
           <h3>对应代码</h3>
-          <p><code>python/llm/local_model.py</code></p>
+          <ul>
+            <li><code>python/llm/local_model.py</code> — 核心适配器（mock + 真实双路径）</li>
+            <li><code>lora/utils.py</code> — 同仓库的 LoRA 微调基础设施，共享设备检测与模型加载逻辑</li>
+          </ul>
         </div>
 
         <figure class="codecard">
-          <figcaption><code>python/llm/local_model.py</code> · L13-L37</figcaption>
-          <pre><code>    def generate_structured_copy(
-        self,
-        prompt: str,
-        product_info: dict,
-        platform: str,
-        locale: str,
-        style: str,
-        context_docs: list[str],
-    ) -&gt; tuple[str, AffiliateCopy]:
-        title = product_info.get("title", "Untitled Product")
-        highlights = list(product_info.get("highlights", []))
-        while len(highlights) &lt; 3:
-            highlights.append(f"Reliable value for {platform} shoppers")
-
-        localized_hook = self._localized_hook(locale, style)
-        risk_notes = ["Avoid exaggerated claims", "Use real product benefits only"]</code></pre>
+          <figcaption><code>python/llm/local_model.py</code> · 真实推理路径核心</figcaption>
+          <pre><code>    def _llm_generate(self, product_info, platform, locale, style, context_docs):
+        self._ensure_model()  # 懒加载：首次请求时加载 Qwen，自动检测 CUDA/MPS/CPU
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_prompt},
+        ]
+        text = self._tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        inputs = self._tokenizer(text, return_tensors="pt").to(self._device)
+        with torch.no_grad():
+            out = self._model.generate(**inputs, max_new_tokens=512, temperature=0.7, top_p=0.9, do_sample=True)
+        raw = self._tokenizer.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
+        copy = self._parse_llm_output(raw, ...)  # 尝试提取 JSON，失败则降级包装
+        return raw, copy</code></pre>
         </figure>
 
         <div class="block">
-          <h3>为什么这么写</h3>
+          <h3>工作方式</h3>
+          <table class="fileref">
+            <thead><tr><th>环境变量</th><th>含义</th><th>默认值</th></tr></thead>
+            <tbody>
+              <tr><td><code>AFFILIATE_MODEL_MODE</code></td><td><code>local</code> = 真实 Qwen 推理；<code>mock</code> = 拼字符串</td><td><code>local</code></td></tr>
+              <tr><td><code>AFFILIATE_MODEL_PATH</code></td><td>HuggingFace 模型 ID 或本地路径</td><td><code>Qwen/Qwen1.5-1.8B-Chat</code></td></tr>
+            </tbody>
+          </table>
           <ul>
-            <li><strong>接口稳定</strong>：签名固定是 <code>(prompt, product_info, ...) -&gt; (raw_output, AffiliateCopy)</code>，换真模型只需要保证这个契约。</li>
-            <li><strong>mode 开关</strong>：<code>Runtime</code> 通过环境变量 <code>AFFILIATE_MODEL_MODE</code> 决定走 mock 还是真模型（见 <code>bridge/runtime.py</code> L32-L35）。</li>
-            <li><strong>deterministic mock</strong>：mock 的输出跟输入有稳定关系，方便写单元测试（见 <code>python/tests/test_prompt_lab.py</code>）。</li>
+            <li><strong>懒加载</strong>：模型在第一次请求时才加载，不拖慢服务启动。</li>
+            <li><strong>自动设备检测</strong>：CUDA → 4-bit QLoRA 量化；Apple Silicon → MPS + bfloat16；否则 CPU。</li>
+            <li><strong>JSON 解析 + 降级</strong>：Prompt 要求 LLM 输出 JSON，解析成功走 <code>AffiliateCopy</code>；解析失败则把原始文本包装成 selling_points，保证不崩。</li>
           </ul>
+        </div>
+
+        <div class="block">
+          <h3>与 LoRA 微调的关系</h3>
+          <p>同仓库 <code>lora/</code> 目录就是一套完整的 LoRA 微调流程（数据准备 → 注入 → 训练 → 推理对比 → 评测）。<code>LocalModelAdapter</code> 复用了同样的 <code>transformers</code> 加载逻辑。如果你用 <code>lora/step3_train.py</code> 微调出了自己的 adapter，可以合并后设 <code>AFFILIATE_MODEL_PATH</code> 指向它，Studio 就会用你的微调模型。</p>
         </div>
 
         <div class="block concept">
           <h3>背后的 AI 概念</h3>
-          <p><strong>模型抽象层</strong>是任何要上生产的 AI 系统必备的：方便切换供应商（OpenAI/本地/Claude）、做降级兜底、做测试桩。<code>LocalModelAdapter</code> 就是这个抽象最小实现。</p>
+          <p><strong>模型抽象层</strong>是任何要上生产的 AI 系统必备的：方便切换供应商（OpenAI/本地/Claude）、做降级兜底、做测试桩。<code>LocalModelAdapter</code> 用 <code>mode</code> 区分路径：<code>local</code> 走真实推理，<code>mock</code> 走确定性桩（保留用于单元测试和 CI）。</p>
         </div>
 
         <div class="block practice">
           <h3>动手练习</h3>
           <ol>
-            <li>把 <code>mode == "ollama"</code> 分支实现出来：内部用 <code>ollama</code> 的 HTTP API 调本机模型，拿到原始文本后 <code>json.loads</code> 再 <code>AffiliateCopy.model_validate</code>。</li>
-            <li>在 adapter 里加一个简单的 LRU 缓存：相同 prompt 直接复用结果，能显著降低调试期的响应延迟。</li>
-            <li>进一步：把 <code>generate_structured_copy</code> 的内部实现切成"先让 LLM 自由生成 → 再用 Pydantic 校验 → 失败时降级到规则"。</li>
+            <li>运行 Studio，选不同 locale（如 <code>zh-CN</code>、<code>id-ID</code>），对比真实模型生成的文案与 mock 的差异——LLM 是否真的在"创作"而非拼模板？</li>
+            <li>在 adapter 里加一个 LRU 缓存：相同 prompt 直接复用结果，能显著降低调试期的响应延迟。</li>
+            <li>把 <code>_parse_llm_output</code> 的降级策略改进：先让 LLM 自由生成 → 用 Pydantic 校验 → 失败时 retry 一次 → 仍失败再降级到规则。</li>
+            <li>用 <code>lora/</code> 微调一个台湾电商风格的 adapter，合并后设 <code>AFFILIATE_MODEL_PATH</code> 指向它，看 Studio 生成的文案是否变得"更像本地网红"。</li>
           </ol>
         </div>
       </section>
@@ -571,8 +584,8 @@ class AffiliateDecision(BaseModel):
               <p>第 3 章：把 <code>KeywordRetriever</code> 换成 <code>sentence-transformers</code> + Chroma。接口保持不变是关键。</p>
             </li>
             <li>
-              <strong>第 6 步 · 换真模型</strong>
-              <p>第 7 章：实现 <code>LocalModelAdapter</code> 的真实分支（Ollama / transformers）。这一步做完你就有了一个完全本地的 affiliate AI。</p>
+              <strong>第 6 步 · 体验真模型</strong>
+              <p>第 7 章：默认已用 Qwen1.5-1.8B-Chat 做推理。可以改 <code>AFFILIATE_MODEL_PATH</code> 指向更大的模型（如 Qwen2.5-7B）或你自己微调后的 LoRA 合并版，对比文案质量差异。</p>
             </li>
             <li>
               <strong>第 7 步 · 可选：做真 Agent</strong>

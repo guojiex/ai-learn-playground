@@ -34,7 +34,7 @@ def build_runtime(project_root: Path) -> Runtime:
         commission_tool=CommissionLookupTool.from_file(assets_dir / "products" / "commission_rates.json"),
         retriever=KeywordRetriever(load_kb_documents(assets_dir / "kb")),
         model=LocalModelAdapter(
-            mode=os.getenv("AFFILIATE_MODEL_MODE", "mock"),
+            mode=os.getenv("AFFILIATE_MODEL_MODE", "local"),
             model_path=os.getenv("AFFILIATE_MODEL_PATH"),
         ),
         prompt_runner=run_prompt_lab,

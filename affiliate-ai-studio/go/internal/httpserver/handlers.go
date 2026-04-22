@@ -116,7 +116,7 @@ func (h *Handler) RunAffiliateFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 	defer cancel()
 
 	sessionID, resp, err := h.app.RunAffiliateFlow(ctx, req)
