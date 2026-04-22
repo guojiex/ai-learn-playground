@@ -101,7 +101,7 @@
             <li><strong>构建前端</strong>：自动 <code>npm install</code>（首次）+ <code>npm run build</code>，把 React 产物嵌入 Go 静态目录。</li>
             <li><strong>启动 Go 服务</strong>：<code>go run ./cmd/studio</code>，自动打开浏览器。</li>
           </ol>
-          <p>首次运行需下载模型权重（~3.6 GB），后续会复用 HuggingFace 缓存。</p>
+          <p>首次运行需下载模型权重（Qwen2.5-0.5B 约 1 GB），后续复用 HuggingFace 缓存。模型在 worker 启动时即预加载，不会让第一次请求卡住。</p>
         </div>
 
         <div class="block practice">
@@ -506,7 +506,7 @@ class AffiliateDecision(BaseModel):
       <section class="chapter" id="ch-7">
         <div class="chapter__tag">章节 7 · 本地模型适配</div>
         <h2>LocalModelAdapter：真实 Qwen 推理 + 小模型容错</h2>
-        <p class="chapter__lead">一句话：<strong>默认调 Qwen1.5-1.8B-Chat 做本地推理</strong>，用 <code>_coerce_str</code> 容错机制应对小模型"不按格式出牌"的现实。</p>
+        <p class="chapter__lead">一句话：<strong>默认调 Qwen2.5-0.5B-Instruct 做本地推理</strong>（约 1GB，启动时预加载），用 <code>_coerce_str</code> 容错机制应对小模型"不按格式出牌"的现实。</p>
 
         <div class="block">
           <h3>对应代码</h3>
@@ -559,11 +559,11 @@ class AffiliateDecision(BaseModel):
             <thead><tr><th>环境变量</th><th>含义</th><th>默认值</th></tr></thead>
             <tbody>
               <tr><td><code>AFFILIATE_MODEL_MODE</code></td><td><code>local</code> = 真实 Qwen 推理；<code>mock</code> = 拼字符串</td><td><code>local</code></td></tr>
-              <tr><td><code>AFFILIATE_MODEL_PATH</code></td><td>HuggingFace 模型 ID 或本地路径</td><td><code>Qwen/Qwen1.5-1.8B-Chat</code></td></tr>
+              <tr><td><code>AFFILIATE_MODEL_PATH</code></td><td>HuggingFace 模型 ID 或本地路径</td><td><code>Qwen/Qwen2.5-0.5B-Instruct</code></td></tr>
             </tbody>
           </table>
           <ul>
-            <li><strong>懒加载</strong>：模型在第一次请求时才加载，不拖慢服务启动。</li>
+            <li><strong>启动预加载</strong>：worker 启动时即调用 <code>warmup()</code> 加载模型，首次请求无需等待。</li>
             <li><strong>自动设备检测</strong>：CUDA → 4-bit QLoRA 量化；Apple Silicon → MPS + bfloat16；否则 CPU。</li>
             <li><strong>三级容错解析</strong>：
               <ol>
@@ -639,7 +639,7 @@ lora/venv/                     ← 只装 torch + datasets + peft（互不干扰
             </li>
             <li>
               <strong>第 6 步 · 体验真模型 + 理解容错</strong>
-              <p>第 7 章：默认已用 Qwen1.5-1.8B-Chat 做推理。观察小模型的"不完美输出"（如 <code>localized_hook</code> 变成 dict），理解 <code>_coerce_str</code> 容错为什么是小模型工程的必修课。可以改 <code>AFFILIATE_MODEL_PATH</code> 指向更大的模型（如 Qwen2.5-7B）或你的 LoRA 合并版，对比文案质量和格式遵从度。</p>
+              <p>第 7 章：默认已用 Qwen2.5-0.5B-Instruct 做推理（启动时预加载）。观察小模型的"不完美输出"（如 <code>localized_hook</code> 变成 dict），理解 <code>_coerce_str</code> 容错为什么是小模型工程的必修课。可以改 <code>AFFILIATE_MODEL_PATH</code> 指向更大的模型（如 Qwen2.5-7B）或你的 LoRA 合并版，对比文案质量和格式遵从度。</p>
             </li>
             <li>
               <strong>第 7 步 · 可选：做真 Agent</strong>

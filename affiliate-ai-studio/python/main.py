@@ -29,6 +29,7 @@ def main() -> None:
     _configure_logging()
     project_root = Path(__file__).resolve().parents[1]
     runtime = build_runtime(project_root)
+    runtime.model.warmup()
     for line in sys.stdin:
         line = line.strip()
         if not line:

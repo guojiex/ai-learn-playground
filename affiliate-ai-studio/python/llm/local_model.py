@@ -33,12 +33,20 @@ Policy context:
 Return the JSON now."""
 
 
+_DEFAULT_MODEL = "Qwen/Qwen2.5-0.5B-Instruct"
+
+
 @dataclass
 class LocalModelAdapter:
     mode: str = "mock"
     model_path: str | None = None
     _model: Any = field(default=None, repr=False)
     _tokenizer: Any = field(default=None, repr=False)
+
+    def warmup(self) -> None:
+        """Pre-load model at startup so the first request doesn't pay the cost."""
+        if self.mode != "mock":
+            self._ensure_model()
 
     def generate_structured_copy(
         self,
@@ -63,7 +71,7 @@ class LocalModelAdapter:
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
-        model_id = self.model_path or "Qwen/Qwen1.5-1.8B-Chat"
+        model_id = self.model_path or _DEFAULT_MODEL
         logger.info("loading LLM %s …", model_id)
 
         self._tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
