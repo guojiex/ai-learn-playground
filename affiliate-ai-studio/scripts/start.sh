@@ -2,35 +2,45 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$PROJECT_DIR/.." && pwd)"
+VENV_DIR="$PROJECT_DIR/.venv"
 
-# Use PYTHON for both pip and the Go worker subprocess. On macOS, prefer a
-# Homebrew Python (linked against OpenSSL) over /usr/bin/python3 (LibreSSL),
-# which triggers urllib3's NotOpenSSLWarning.
-if [ -z "${PYTHON:-}" ]; then
+# ---------------------------------------------------------------------------
+# 1) 找到一个可用的基础 Python 解释器（≥3.11，ARM64 原生优先）
+# ---------------------------------------------------------------------------
+find_base_python() {
+  # lora venv 里有 ARM64 原生 Python 3.11，优先用它来创建 venv
+  local lora_py="$REPO_ROOT/lora/venv/bin/python3"
+  if [ -x "$lora_py" ]; then echo "$lora_py"; return; fi
+
+  # Homebrew
   if [ "$(uname -s)" = "Darwin" ]; then
-    for candidate in \
-      /opt/homebrew/bin/python3.13 \
-      /opt/homebrew/bin/python3.12 \
-      /opt/homebrew/bin/python3.11 \
-      /usr/local/bin/python3.13 \
-      /usr/local/bin/python3.12 \
-      /usr/local/bin/python3.11; do
-      if [ -x "$candidate" ]; then
-        PYTHON="$candidate"
-        break
-      fi
+    for c in /opt/homebrew/bin/python3.{13,12,11} /usr/local/bin/python3.{13,12,11}; do
+      if [ -x "$c" ]; then echo "$c"; return; fi
     done
   fi
-  if [ -z "${PYTHON:-}" ]; then
-    for name in python3.13 python3.12 python3.11; do
-      if command -v "$name" >/dev/null 2>&1; then
-        PYTHON="$(command -v "$name")"
-        break
-      fi
-    done
-  fi
-fi
-PYTHON="${PYTHON:-python3}"
+
+  # PATH
+  for n in python3.13 python3.12 python3.11 python3; do
+    if command -v "$n" >/dev/null 2>&1; then command -v "$n"; return; fi
+  done
+}
+
+# ---------------------------------------------------------------------------
+# 2) 确保本项目有自己的 venv（带 pip + 所有依赖）
+# ---------------------------------------------------------------------------
+ensure_venv() {
+  if [ -x "$VENV_DIR/bin/python3" ]; then return; fi
+
+  local base_py
+  base_py="$(find_base_python)"
+  echo "[start] creating venv with: $base_py"
+  "$base_py" -m venv "$VENV_DIR"
+  "$VENV_DIR/bin/python3" -m ensurepip --upgrade 2>/dev/null || true
+}
+
+ensure_venv
+PYTHON="$VENV_DIR/bin/python3"
 export PYTHON
 
 PORT="${PORT:-8080}"
@@ -40,7 +50,7 @@ cd "$PROJECT_DIR"
 
 echo "[start] using python: ${PYTHON}"
 echo "[start] checking python dependencies..."
-if ! "$PYTHON" -c "import pydantic, langchain_core, langgraph" >/dev/null 2>&1; then
+if ! "$PYTHON" -c "import pydantic, langchain_core, langgraph, torch, transformers" >/dev/null 2>&1; then
   echo "[start] missing deps, installing from python/requirements.txt"
   "$PYTHON" -m pip install -q -r python/requirements.txt
 else
