@@ -120,6 +120,22 @@ class LocalModelAdapter:
         return raw, copy
 
     @staticmethod
+    def _coerce_str(value: Any, locale: str) -> str:
+        """LLM sometimes returns a dict like {'zh-CN': '...'} instead of a plain string."""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            if locale in value:
+                return str(value[locale])
+            lang_prefix = locale.split("-")[0]
+            for k, v in value.items():
+                if k.lower().startswith(lang_prefix):
+                    return str(v)
+            if value:
+                return str(next(iter(value.values())))
+        return str(value) if value else ""
+
+    @staticmethod
     def _parse_llm_output(
         raw: str, product_info: dict, platform: str, locale: str, style: str,
     ) -> AffiliateCopy:
@@ -128,11 +144,19 @@ class LocalModelAdapter:
         if m:
             try:
                 d = json.loads(m.group())
+                hook_raw = d.get("localized_hook", "")
+                sp_raw = d.get("selling_points", [])
+                rn_raw = d.get("risk_notes", [])
                 return AffiliateCopy(
-                    title=d.get("title", f"{platform} pick: {product_info.get('title', '')}"),
-                    selling_points=d.get("selling_points", [])[:3] or ["See product details"],
-                    localized_hook=d.get("localized_hook", ""),
-                    risk_notes=d.get("risk_notes", []),
+                    title=LocalModelAdapter._coerce_str(
+                        d.get("title", f"{platform} pick: {product_info.get('title', '')}"),
+                        locale,
+                    ),
+                    selling_points=[
+                        LocalModelAdapter._coerce_str(s, locale) for s in (sp_raw[:3] or ["See product details"])
+                    ],
+                    localized_hook=LocalModelAdapter._coerce_str(hook_raw, locale),
+                    risk_notes=[LocalModelAdapter._coerce_str(r, locale) for r in rn_raw],
                 )
             except (json.JSONDecodeError, KeyError, TypeError):
                 pass

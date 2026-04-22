@@ -30,7 +30,7 @@
         <li><a href="#ch-4" data-chapter="ch-4">4 · Tools · 让 LLM 查外部数据</a></li>
         <li><a href="#ch-5" data-chapter="ch-5">5 · LangGraph · 状态机编排</a></li>
         <li><a href="#ch-6" data-chapter="ch-6">6 · Go ↔ Python 桥 · 进程间 JSONL</a></li>
-        <li><a href="#ch-7" data-chapter="ch-7">7 · LocalModelAdapter · 本地 Qwen 推理</a></li>
+        <li><a href="#ch-7" data-chapter="ch-7">7 · LocalModelAdapter · 本地推理 + 小模型容错</a></li>
         <li><a href="#ch-8" data-chapter="ch-8">8 · 实战路径 · 按顺序怎么练</a></li>
       </ol>
       <div class="learn-sidebar__tip">
@@ -71,12 +71,14 @@
           <table class="fileref">
             <thead><tr><th>文件</th><th>职责</th></tr></thead>
             <tbody>
+              <tr><td><code>scripts/start.sh</code></td><td>一键启动：自动创建 <code>.venv</code>、装依赖、构建前端、跑 Go 服务</td></tr>
               <tr><td><code>go/cmd/studio/main.go</code></td><td>Go 进程入口，启动 worker + ListenAndServe</td></tr>
               <tr><td><code>go/internal/httpserver/</code></td><td>路由 + Handler + JSON I/O</td></tr>
               <tr><td><code>go/internal/worker/client.go</code></td><td>管理 Python 子进程，发 JSONL</td></tr>
               <tr><td><code>python/main.py</code></td><td>Python worker，按行读请求、写响应</td></tr>
               <tr><td><code>python/bridge/runtime.py</code></td><td>装配 Tool / Retriever / Model，action 分发</td></tr>
               <tr><td><code>python/graph/affiliate_graph.py</code></td><td>整个业务流的状态机核心</td></tr>
+              <tr><td><code>python/llm/local_model.py</code></td><td>LLM 适配器：真实 Qwen 推理 + mock 双路径</td></tr>
             </tbody>
           </table>
         </div>
@@ -90,10 +92,22 @@
           </ul>
         </div>
 
+        <div class="block">
+          <h3>环境管理</h3>
+          <p><code>scripts/start.sh</code> 会自动完成所有准备工作：</p>
+          <ol>
+            <li><strong>创建独立 <code>.venv</code></strong>：优先复用同仓库 <code>lora/venv</code> 里的 Python 3.11 解释器（ARM64 原生），回退到 Homebrew、再回退到系统 Python。</li>
+            <li><strong>安装依赖</strong>：检测 <code>pydantic / langchain_core / langgraph / torch / transformers</code> 是否齐全，缺了自动 <code>pip install</code>。</li>
+            <li><strong>构建前端</strong>：自动 <code>npm install</code>（首次）+ <code>npm run build</code>，把 React 产物嵌入 Go 静态目录。</li>
+            <li><strong>启动 Go 服务</strong>：<code>go run ./cmd/studio</code>，自动打开浏览器。</li>
+          </ol>
+          <p>首次运行需下载模型权重（~3.6 GB），后续会复用 HuggingFace 缓存。</p>
+        </div>
+
         <div class="block practice">
           <h3>动手练习</h3>
           <ol>
-            <li>打开 Studio，点一次"运行完整流程"。</li>
+            <li>运行 <code>bash scripts/start.sh</code>，观察 log 中每一步的输出。</li>
             <li>看 Go 的 log，再看返回 JSON 里的 <code>trace</code>，把每个节点和上面的时序图对上号。</li>
             <li>把 <code>python/main.py</code> 的 print 替换成打印到 stderr，看 Go worker 里是怎么被丢掉/保留的（见 <code>client.go</code> 里的 <code>io.Copy(io.Discard, stderr)</code>）。</li>
           </ol>
@@ -491,14 +505,15 @@ class AffiliateDecision(BaseModel):
 
       <section class="chapter" id="ch-7">
         <div class="chapter__tag">章节 7 · 本地模型适配</div>
-        <h2>LocalModelAdapter：从 Mock 到真实 Qwen 推理</h2>
-        <p class="chapter__lead">一句话：<strong>默认直接调 Qwen1.5-1.8B-Chat 做本地推理</strong>，模型首次加载约需下载 3.6GB 权重，之后缓存在 HuggingFace cache 里。</p>
+        <h2>LocalModelAdapter：真实 Qwen 推理 + 小模型容错</h2>
+        <p class="chapter__lead">一句话：<strong>默认调 Qwen1.5-1.8B-Chat 做本地推理</strong>，用 <code>_coerce_str</code> 容错机制应对小模型"不按格式出牌"的现实。</p>
 
         <div class="block">
           <h3>对应代码</h3>
           <ul>
-            <li><code>python/llm/local_model.py</code> — 核心适配器（mock + 真实双路径）</li>
-            <li><code>lora/utils.py</code> — 同仓库的 LoRA 微调基础设施，共享设备检测与模型加载逻辑</li>
+            <li><code>python/llm/local_model.py</code> — 核心适配器（mock + 真实双路径 + 输出容错）</li>
+            <li><code>scripts/start.sh</code> — 自动创建 <code>.venv</code>，复用 <code>lora/</code> 的 Python 解释器</li>
+            <li><code>lora/</code> — 同仓库的 LoRA 微调基础设施，共享 Python 解释器和模型加载逻辑</li>
           </ul>
         </div>
 
@@ -515,8 +530,27 @@ class AffiliateDecision(BaseModel):
         with torch.no_grad():
             out = self._model.generate(**inputs, max_new_tokens=512, temperature=0.7, top_p=0.9, do_sample=True)
         raw = self._tokenizer.decode(out[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True)
-        copy = self._parse_llm_output(raw, ...)  # 尝试提取 JSON，失败则降级包装
+        copy = self._parse_llm_output(raw, ...)  # 尝试提取 JSON → _coerce_str 容错 → 失败则降级
         return raw, copy</code></pre>
+        </figure>
+
+        <figure class="codecard">
+          <figcaption><code>python/llm/local_model.py</code> · _coerce_str 容错</figcaption>
+          <pre><code>    @staticmethod
+    def _coerce_str(value: Any, locale: str) -&gt; str:
+        """LLM sometimes returns a dict like {'zh-CN': '...'} instead of a plain string."""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            if locale in value:
+                return str(value[locale])
+            lang_prefix = locale.split("-")[0]
+            for k, v in value.items():
+                if k.lower().startswith(lang_prefix):
+                    return str(v)
+            if value:
+                return str(next(iter(value.values())))
+        return str(value) if value else ""</code></pre>
         </figure>
 
         <div class="block">
@@ -531,8 +565,26 @@ class AffiliateDecision(BaseModel):
           <ul>
             <li><strong>懒加载</strong>：模型在第一次请求时才加载，不拖慢服务启动。</li>
             <li><strong>自动设备检测</strong>：CUDA → 4-bit QLoRA 量化；Apple Silicon → MPS + bfloat16；否则 CPU。</li>
-            <li><strong>JSON 解析 + 降级</strong>：Prompt 要求 LLM 输出 JSON，解析成功走 <code>AffiliateCopy</code>；解析失败则把原始文本包装成 selling_points，保证不崩。</li>
+            <li><strong>三级容错解析</strong>：
+              <ol>
+                <li>从 LLM 原始输出提取 JSON → <code>json.loads</code></li>
+                <li>每个字段过 <code>_coerce_str</code>：小模型常把 <code>localized_hook</code> 写成 <code>{"zh-CN": "..."}</code> dict 而非 string，容错层按 locale 提取正确值</li>
+                <li>JSON 完全解析失败 → 把原始文本包装成 <code>selling_points</code>，保证不崩</li>
+              </ol>
+            </li>
           </ul>
+        </div>
+
+        <div class="block">
+          <h3>环境管理：为什么不直接复用 lora 的 venv</h3>
+          <p><code>lora/venv</code> 只装了微调需要的包（torch、transformers、datasets），缺少 Studio 需要的 <code>pydantic</code>、<code>langchain_core</code>、<code>langgraph</code>，且没装 <code>pip</code> 无法追加安装。直接在别人的 venv 里装包也有依赖冲突风险。</p>
+          <p>所以 <code>start.sh</code> 的策略是：<strong>用 lora venv 里的 Python 3.11 解释器创建 Studio 自己的 <code>.venv</code></strong>。这样既拿到了 ARM64 原生的正确解释器，又保持两个项目的依赖隔离。</p>
+          <pre class="ascii">lora/venv/bin/python3          ← ARM64 Python 3.11 解释器
+        │
+        ├─ python -m venv .venv  ← 创建 Studio 独立 venv
+        │
+affiliate-ai-studio/.venv/    ← 装 pydantic + langchain + torch + …
+lora/venv/                     ← 只装 torch + datasets + peft（互不干扰）</pre>
         </div>
 
         <div class="block">
@@ -543,6 +595,7 @@ class AffiliateDecision(BaseModel):
         <div class="block concept">
           <h3>背后的 AI 概念</h3>
           <p><strong>模型抽象层</strong>是任何要上生产的 AI 系统必备的：方便切换供应商（OpenAI/本地/Claude）、做降级兜底、做测试桩。<code>LocalModelAdapter</code> 用 <code>mode</code> 区分路径：<code>local</code> 走真实推理，<code>mock</code> 走确定性桩（保留用于单元测试和 CI）。</p>
+          <p><strong>防御性输出解析</strong>是本地小模型工程的必修课。大模型（GPT-4、Claude）的结构化输出基本可靠，但 1.8B 参数的 Qwen 经常"创造性发挥"——把字符串字段写成 dict、把数组写成逗号分隔的字符串、甚至混入 markdown 格式。<code>_coerce_str</code> 就是应对这类问题的通用模式：<strong>尽量理解意图，而非严格校验格式</strong>。</p>
         </div>
 
         <div class="block practice">
@@ -551,6 +604,7 @@ class AffiliateDecision(BaseModel):
             <li>运行 Studio，选不同 locale（如 <code>zh-CN</code>、<code>id-ID</code>），对比真实模型生成的文案与 mock 的差异——LLM 是否真的在"创作"而非拼模板？</li>
             <li>在 adapter 里加一个 LRU 缓存：相同 prompt 直接复用结果，能显著降低调试期的响应延迟。</li>
             <li>把 <code>_parse_llm_output</code> 的降级策略改进：先让 LLM 自由生成 → 用 Pydantic 校验 → 失败时 retry 一次 → 仍失败再降级到规则。</li>
+            <li>在 <code>_coerce_str</code> 里加日志：统计哪些字段命中了 dict→str 转换，这是评估模型是否需要微调的重要信号。</li>
             <li>用 <code>lora/</code> 微调一个台湾电商风格的 adapter，合并后设 <code>AFFILIATE_MODEL_PATH</code> 指向它，看 Studio 生成的文案是否变得"更像本地网红"。</li>
           </ol>
         </div>
@@ -565,7 +619,7 @@ class AffiliateDecision(BaseModel):
           <ol class="roadmap__list">
             <li>
               <strong>第 1 步 · 跑通全链路</strong>
-              <p>打开 Studio → 运行 → 对着 <code>trace</code> 一个个节点看。目标：把第 0 章的时序图亲手走一遍。</p>
+              <p>运行 <code>bash scripts/start.sh</code>，首次会自动创建 <code>.venv</code>、安装依赖、下载模型。打开 Studio → 运行 → 对着 <code>trace</code> 一个个节点看。目标：把第 0 章的时序图亲手走一遍。</p>
             </li>
             <li>
               <strong>第 2 步 · 改 Prompt 和 Schema</strong>
@@ -584,8 +638,8 @@ class AffiliateDecision(BaseModel):
               <p>第 3 章：把 <code>KeywordRetriever</code> 换成 <code>sentence-transformers</code> + Chroma。接口保持不变是关键。</p>
             </li>
             <li>
-              <strong>第 6 步 · 体验真模型</strong>
-              <p>第 7 章：默认已用 Qwen1.5-1.8B-Chat 做推理。可以改 <code>AFFILIATE_MODEL_PATH</code> 指向更大的模型（如 Qwen2.5-7B）或你自己微调后的 LoRA 合并版，对比文案质量差异。</p>
+              <strong>第 6 步 · 体验真模型 + 理解容错</strong>
+              <p>第 7 章：默认已用 Qwen1.5-1.8B-Chat 做推理。观察小模型的"不完美输出"（如 <code>localized_hook</code> 变成 dict），理解 <code>_coerce_str</code> 容错为什么是小模型工程的必修课。可以改 <code>AFFILIATE_MODEL_PATH</code> 指向更大的模型（如 Qwen2.5-7B）或你的 LoRA 合并版，对比文案质量和格式遵从度。</p>
             </li>
             <li>
               <strong>第 7 步 · 可选：做真 Agent</strong>
@@ -605,6 +659,8 @@ class AffiliateDecision(BaseModel):
               <tr><td>Tool 调用</td><td><code>python/tools/*</code></td><td>LangChain Tool、ReAct 论文</td></tr>
               <tr><td>Agent 编排</td><td><code>python/graph/affiliate_graph.py</code></td><td>LangGraph 官方示例（chat_agent_executor）</td></tr>
               <tr><td>工程架构</td><td><code>go/internal/worker/client.go</code></td><td>gRPC、FastAPI、子进程模型</td></tr>
+              <tr><td>小模型容错</td><td><code>python/llm/local_model.py</code> · <code>_coerce_str</code></td><td>Outlines / LMQL（结构化生成约束）</td></tr>
+              <tr><td>环境管理</td><td><code>scripts/start.sh</code> · venv 策略</td><td>Python venv 文档、pip-tools</td></tr>
             </tbody>
           </table>
         </div>
