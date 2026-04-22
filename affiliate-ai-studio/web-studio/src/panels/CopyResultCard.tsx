@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -6,7 +7,11 @@ import {
   XCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
-import type { ProductInfo, ResultPayload } from "@/api/affiliate";
+import {
+  normalizeAffiliateCopyPayload,
+  type ProductInfo,
+  type ResultPayload,
+} from "@/api/affiliate";
 import { useRunStore } from "@/store/runStore";
 
 export function CopyResultCard({
@@ -19,6 +24,12 @@ export function CopyResultCard({
   const threshold = useRunStore((s) => s.form.min_commission_rate);
   const isAccepted = result.decision === "accepted";
   const isFallback = productInfo?.fallback === true;
+
+  /** 与 API 层一致；组件内再算一次，避免未走 runAffiliate 或旧 bundle 时 Hook/Body 空白 */
+  const copy = useMemo(
+    () => normalizeAffiliateCopyPayload(result.copy as unknown),
+    [result.copy],
+  );
 
   return (
     <div className="space-y-4 p-4">
@@ -49,35 +60,35 @@ export function CopyResultCard({
 
       {productInfo ? <ProductBlock product={productInfo} /> : null}
 
-      {isAccepted && result.copy ? (
+      {isAccepted && copy ? (
         <div className="space-y-3 rounded-xl border border-success/40 bg-success/5 p-4">
           <div>
             <p className="text-xs font-medium uppercase tracking-wide text-fgMuted">
               Title
             </p>
             <p className="text-lg font-semibold leading-snug">
-              {result.copy.title}
+              {copy.title}
             </p>
           </div>
           <div>
             <p className="text-xs font-medium uppercase tracking-wide text-fgMuted">
               Hook
             </p>
-            <p className="text-sm text-fg/90">{result.copy.hook}</p>
+            <p className="text-sm text-fg/90">{copy.hook}</p>
           </div>
           <div>
             <p className="text-xs font-medium uppercase tracking-wide text-fgMuted">
               Body
             </p>
             <p className="whitespace-pre-wrap text-sm text-fg/90">
-              {result.copy.body}
+              {copy.body}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-1 rounded-full bg-primary px-3 py-1 text-xs font-medium text-primaryFg">
-              <LinkIcon size={12} /> {result.copy.cta}
+              <LinkIcon size={12} /> {copy.cta}
             </span>
-            {result.copy.tags?.map((t) => (
+            {copy.tags?.map((t) => (
               <Badge key={t} tone="info">
                 <Tag size={10} /> {t}
               </Badge>

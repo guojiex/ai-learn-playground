@@ -45,7 +45,11 @@ type Client struct {
 }
 
 func Start(ctx context.Context, pythonDir string) (*Client, error) {
-	cmd := exec.CommandContext(ctx, "python3", "main.py")
+	pythonBin := os.Getenv("PYTHON")
+	if pythonBin == "" {
+		pythonBin = "python3"
+	}
+	cmd := exec.CommandContext(ctx, pythonBin, "main.py")
 	cmd.Dir = pythonDir
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

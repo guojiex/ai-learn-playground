@@ -57,4 +57,23 @@ describe("CopyResultCard", () => {
     );
     expect(screen.getByText("fallback fixture")).toBeInTheDocument();
   });
+
+  it("result.copy 为 Python AffiliateCopy 形状时仍能展示 Hook/Body", () => {
+    const workerShaped = {
+      decision: "accepted" as const,
+      reason: "Commission threshold met",
+      commission_rate: 0.18,
+      copy: {
+        title: "TikTok pick: Demo",
+        localized_hook: "Localized opening line.",
+        selling_points: ["Point A", "Point B"],
+        risk_notes: ["Stay compliant"],
+      },
+    } as unknown as ResultPayload;
+
+    render(<CopyResultCard result={workerShaped} />);
+    expect(screen.getByText("Localized opening line.")).toBeInTheDocument();
+    expect(screen.getByText(/Point A/)).toBeInTheDocument();
+    expect(screen.getByText(/Stay compliant/)).toBeInTheDocument();
+  });
 });

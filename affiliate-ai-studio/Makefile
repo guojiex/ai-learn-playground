@@ -27,8 +27,8 @@ test-web:
 	cd web-studio && $(NPM) test --silent
 
 run:
-	cd go && go run ./cmd/studio
+	cd go && env PYTHON="$(PYTHON)" go run ./cmd/studio
 
 # 开发：同时使用 Vite dev server。搭配 `make dev-web` 使用。
 run-dev:
-	cd go && AFFILIATE_STUDIO_DEV=1 go run ./cmd/studio
+	cd go && env PYTHON="$(PYTHON)" AFFILIATE_STUDIO_DEV=1 go run ./cmd/studio
