@@ -5,6 +5,16 @@
       "label": "Affiliate Studio: Run",
       "type": "shell",
       "command": "./scripts/start.sh",
+      "windows": {
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          ".\\scripts\\start.ps1"
+        ]
+      },
       "options": {
         "cwd": "${workspaceFolder}/affiliate-ai-studio"
       },
