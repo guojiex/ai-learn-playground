@@ -1,13 +1,10 @@
 ---
 name: office-politics-combat
 description: >-
-  Analyzes internet-company office politics (boss PUA, QA as enforcer proxy,
-  cross-team buck-passing, upward management) and produces three-tier reply
-  scripts (mild / standard / hard) with pre-planted hooks and counter-attack
-  follow-ups. Use when the user mentions 职场政治, 宫斗, PUA, 甩锅, 推诿, QA
-  白手套, 老板打压, 向上管理, 跨部门扯皮, 话术, 钩子, 陷阱, 反击, office
-  politics, passive aggressive boss, blame shifting, or pastes IM screenshots
-  / chat transcripts asking how to respond.
+  Use when the user mentions 职场政治, 宫斗, PUA, 甩锅, 推诿, QA 白手套,
+  老板打压, 向上管理, 跨部门扯皮, 话术, 钩子, 陷阱, 反击, 风险接受人, 周报防御,
+  留痕, office politics, passive aggressive boss, blame shifting, or asks how
+  to prepare, respond, escalate, or defend against workplace attacks.
 ---
 
 # Office Politics Combat（互联网公司宫斗对话顾问）
@@ -60,6 +57,8 @@ description: >-
 - 描述老板 / 同事的打压、甩锅、PUA，问应对策略
 - 要求准备会议发言、邮件、向上汇报、向 HR / 大老板升级的话术
 - 明确提到"进攻型 / 防守型"、"钩子 / 陷阱"、"反击"
+- 问如何提前防御、留证据、写周报、避免被秋后算账
+- 遇到安全 / 质量 / 发布风险被降级成小 bug，想要求风险接受人 / owner / deadline
 
 ### 输入格式（建议用户按此提供，不全也要尽力分析）
 
@@ -159,6 +158,18 @@ A / B / C 三种可能及概率判断
 ```
 收到用户输入
   │
+  ├─ 是否是事前准备 / 长期防御？
+  │    ├─ 是 → 读 pre-battle-checklist.md + evidence-ledger-template.md
+  │    └─ 否 → 继续
+  │
+  ├─ 是否涉及风险降级 / 风险接受人 / 发布治理 / 安全质量风险？
+  │    ├─ 是 → 读 risk-acceptance-hooks.md
+  │    └─ 否 → 继续
+  │
+  ├─ 是否涉及周报 / 绩效 / 1on1 纪要 / 长期留痕？
+  │    ├─ 是 → 读 weekly-report-defense.md
+  │    └─ 否 → 继续
+  │
   ├─ 是否是对前一轮的反馈？
   │    ├─ 是 → 切换反击模式 → 读 hook-patterns.md 对照钩子 → 输出反击三档
   │    └─ 否 → 继续
@@ -172,6 +183,7 @@ A / B / C 三种可能及概率判断
   ├─ 结合渠道读 channel-playbooks.md 调措辞
   ├─ 从 tactics-offense.md + tactics-defense.md 挑本轮用到的招式
   ├─ 从 hook-patterns.md 选 2~4 个钩子分配到三档方案
+  ├─ 如果需要逐步升级 → 读 counter-escalation-ladder.md
   └─ 按「固定输出模板」输出
 ```
 
@@ -185,6 +197,8 @@ A / B / C 三种可能及概率判断
 4. **预设对方会截图**：每一句都假设会被转发给大老板 / HR，能坦荡发的才发
 5. **给台阶**：强硬档也要留一个让对方体面下台的选项，把选择权丢回去（显得是对方不讲理）
 6. **一次只推进一小步**：不贪多，一轮拿一个书面承诺 / 一个时间节点 / 一个责任人就够
+7. **风险必须责任化**：安全、发布、质量、审计风险不能停在"我们看看"，要收敛到风险等级、owner、deadline、风险接受人
+8. **长期防御优先于临场反击**：能提前用周报、纪要、台账、Jira 铺好证据，就不要等冲突爆发后硬刚
 
 ---
 
@@ -198,6 +212,11 @@ A / B / C 三种可能及概率判断
 | [tactics-defense.md](tactics-defense.md) | 防守型招式（拒锅 / 反问归因 / 留白 / 合规化 / 延迟放行） | 对方攻我时 |
 | [hook-patterns.md](hook-patterns.md) | 钩子模式库，每个钩子配套反击三档 | 埋钩子 + 反击模式 |
 | [channel-playbooks.md](channel-playbooks.md) | 分渠道（IM / 会议 / 邮件 / 向上 / 跨部门 / HR）措辞 | 根据渠道调语气 |
+| [pre-battle-checklist.md](pre-battle-checklist.md) | 事前防御清单（事实库 / 边界 / 话术 / 盟友） | 用户问如何提前准备、防御 PUA、避免秋后算账 |
+| [evidence-ledger-template.md](evidence-ledger-template.md) | 证据台账模板（事件记录 / 证据分级 / 周度整理） | 用户需要长期留痕、沉淀证据、准备升级材料 |
+| [risk-acceptance-hooks.md](risk-acceptance-hooks.md) | 风险接受钩子（风险等级 / 接受人 / 周期 / 范围） | 对方把安全、发布、质量、审计风险降级或拖延 |
+| [weekly-report-defense.md](weekly-report-defense.md) | 周报防御写法（风险 / 阻塞 / 决策需求） | 用户要把风险、阻塞、贡献写进周报 / 绩效材料 |
+| [counter-escalation-ladder.md](counter-escalation-ladder.md) | 反制升级阶梯（不回 / 淡化 / 私下压 / 反咬） | 需要从私聊、Jira、群、周报逐级升级 |
 | [cases/case-bug-triage-qa.md](cases/case-bug-triage-qa.md) | 示范案例：bug 分配博弈的完整闭环 | 作为格式与尺度的参照 |
 
 ---
@@ -225,6 +244,7 @@ A / B / C 三种可能及概率判断
 - 设计话术陷阱，让对方在公开渠道自证理亏
 - 规划升级路径（向上、公开、HR）
 - 识别 PUA 并给出合规反击
+- 帮用户建立事实台账、周报防御、风险接受人话术和逐级升级路径
 
 **本 skill 不做的：**
 
@@ -233,6 +253,7 @@ A / B / C 三种可能及概率判断
 - 不给人身攻击、情绪化发泄的话术
 - 不教挖对方私生活、通过非正当渠道取证
 - 不写损害公司利益的手段（比如故意拖业务把事情闹大）
+- 不建议隐瞒已知安全 / 发布 / 质量风险来等待事故扩大
 
 如果用户诉求越界，**降档到合规方案并说明原因**，不直接拒绝（降低门槛，保持 skill 可用性）。
 
@@ -246,3 +267,5 @@ A / B / C 三种可能及概率判断
 - [ ] 没有情绪化 / 攻击性词汇（强硬档允许冷硬，但不允许辱骂）
 - [ ] 有推荐档位 + 理由
 - [ ] 有下一步监测点（时间、信号、升级条件）
+- [ ] 如果涉及风险，已经要求风险等级、owner、deadline 或风险接受人
+- [ ] 如果是长期防御，已经给出台账 / 周报 / 升级阶梯中的至少一种落地动作
