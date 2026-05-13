@@ -165,6 +165,9 @@ A / B / C 三种可能及概率判断
   ├─ 是否涉及风险降级 / 风险接受人 / 发布治理 / 安全质量风险？
   │    ├─ 是 → 读 risk-acceptance-hooks.md
   │    └─ 否 → 继续
+  ├─ 是否有人把风险范围改写成统计口径 / 环境归类？
+  │    ├─ 是 → 读 cases/case-stats-scope-vs-risk-scope.md
+  │    └─ 否 → 继续
   │
   ├─ 是否涉及周报 / 绩效 / 1on1 纪要 / 长期留痕？
   │    ├─ 是 → 读 weekly-report-defense.md
@@ -218,6 +221,7 @@ A / B / C 三种可能及概率判断
 | [weekly-report-defense.md](weekly-report-defense.md) | 周报防御写法（风险 / 阻塞 / 决策需求） | 用户要把风险、阻塞、贡献写进周报 / 绩效材料 |
 | [counter-escalation-ladder.md](counter-escalation-ladder.md) | 反制升级阶梯（不回 / 淡化 / 私下压 / 反咬） | 需要从私聊、Jira、群、周报逐级升级 |
 | [cases/case-bug-triage-qa.md](cases/case-bug-triage-qa.md) | 示范案例：bug 分配博弈的完整闭环 | 作为格式与尺度的参照 |
+| [cases/case-stats-scope-vs-risk-scope.md](cases/case-stats-scope-vs-risk-scope.md) | 脱敏案例：统计口径 vs 风险影响范围，被白手套降级风险时如何反击 | 对方说“这是统计规则 / 都算测试环境 / 不影响项目统计”，但实际风险涉及发布、审计、权限或生产链路 |
 
 ---
 
