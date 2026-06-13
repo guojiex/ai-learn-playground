@@ -1,0 +1,33 @@
+{{define "content"}}
+  <header class="topbar">
+    <div class="topbar-title">
+      <h1>Chat</h1>
+      <span class="muted">M0 · 单会话, 仅活在浏览器内存. 多会话见 M1.</span>
+    </div>
+    <div class="topbar-meta">
+      <span class="chip">profile <strong>{{.Profile}}</strong></span>
+      <span class="chip">model <strong>{{.Model}}</strong></span>
+      <span class="chip">backend <strong>{{.BaseURL}}</strong></span>
+    </div>
+  </header>
+
+  <details class="persona">
+    <summary>角色卡 (system prompt)</summary>
+    <textarea id="system" rows="3">{{.SystemHi}}</textarea>
+    <p class="muted">本里程碑保存即生效, 不重写已发出的消息. 多会话与持久化在 M1 落地.</p>
+  </details>
+
+  <section id="messages" class="messages" aria-live="polite"></section>
+
+  <footer class="composer">
+    <textarea id="input" rows="2" placeholder="说点什么. Enter 发送, Shift+Enter 换行."></textarea>
+    <div class="composer-actions">
+      <button id="send" type="button">发送</button>
+      <button id="stop" type="button" disabled>停止</button>
+      <button id="reset" type="button" class="ghost">清空</button>
+      <span id="status" class="muted"></span>
+    </div>
+  </footer>
+
+  <script src="/static/chat.js" defer></script>
+{{end}}

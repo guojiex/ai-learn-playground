@@ -1,0 +1,18 @@
+{{define "content"}}
+  <header class="topbar">
+    <div class="topbar-title">
+      <h1>Settings</h1>
+      <span class="muted">运行时配置只读视图. 修改请改环境变量后重启 cmd/web.</span>
+    </div>
+  </header>
+  <section class="settings">
+    <dl class="kv">
+      <dt>Profile</dt><dd>{{.Profile}}</dd>
+      <dt>Base URL</dt><dd><code>{{.BaseURL}}</code></dd>
+      <dt>API Key</dt><dd><code>{{.APIKeyMasked}}</code></dd>
+      <dt>Chat Model</dt><dd><code>{{.ModelChat}}</code></dd>
+      <dt>Request Timeout</dt><dd>{{.RequestTimeout}}</dd>
+      <dt>Max Retries</dt><dd>{{.MaxRetries}}</dd>
+    </dl>
+  </section>
+{{end}}

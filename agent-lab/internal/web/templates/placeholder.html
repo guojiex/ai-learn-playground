@@ -1,0 +1,12 @@
+{{define "content"}}
+  <header class="topbar">
+    <div class="topbar-title">
+      <h1>{{.Label}}</h1>
+      {{if .Milestone}}<span class="muted">{{.Milestone}} 启用后开放</span>{{end}}
+    </div>
+  </header>
+  <section class="empty">
+    <p>{{.Note}}</p>
+    <p class="muted">设计见 <code>agent-lab/docs/06-ui.md</code>.</p>
+  </section>
+{{end}}
