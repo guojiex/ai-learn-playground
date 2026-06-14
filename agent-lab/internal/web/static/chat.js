@@ -20,14 +20,24 @@
   let currentTitle = "";
   let abortCtrl = null;
   let busy = false;
+  // 请求序号: 每次发起 loadConversations 时递增, 旧响应的序号如果低于当前值则丢弃.
+  let loadSeq = 0;
 
   // ----------------- 会话列表 -----------------
   async function loadConversations() {
+    const seq = ++loadSeq; // 获取本次请求的序号
     try {
       const r = await fetch("/api/conversations");
+      if (r.status !== 200) throw new Error("status " + r.status);
       const data = await r.json();
+      // 如果期间有更新的请求发出, 丢弃本响应, 防止陈旧数据覆盖新列表.
+      if (seq !== loadSeq) return;
+      // 清空后再 render, 防止旧的 <li> 与 fetch 结果叠加导致"幽灵残留".
+      $convList.innerHTML = "";
       renderConvList(data.conversations || []);
-    } catch (_) { /* ignore */ }
+    } catch (e) {
+      console.error("[chat] loadConversations failed:", e);
+    }
   }
 
   function renderConvList(convs) {

@@ -9,10 +9,10 @@ import (
 
 // Conversation 是一个会话条目, 用于 Web UI 的会话列表.
 type Conversation struct {
-	ID        string
-	Title     string
-	UpdatedAt time.Time
-	Memory    *memory.ShortTerm
+	ID        string             `json:"id"`
+	Title     string             `json:"title"`
+	UpdatedAt time.Time          `json:"updated_at"`
+	Memory    *memory.ShortTerm  `json:"memory,omitempty"`
 }
 
 // ConversationStore 是进程内的会话存储器.
