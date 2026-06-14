@@ -105,6 +105,31 @@ go run ./agent-lab/cmd/web
 
 ---
 
+## 2026-06-14 — M2 补丁 (Tooling UI + 会话删除)
+
+### Bug 修复
+
+**工具面板 UI (handlers_tools.go / tools.html / tools.js / style.css)**
+- 试调用 textarea placeholder 写死了 product_lookup 示例, 每个工具现配自己的最小示例 (`toolExamples` map).
+- 新增「填示例」按钮, 一键把工具示例复制到 textarea.
+- `.invoke-result:empty` 加 `display:none`, 无结果时不撑出黑边.
+- JSON Schema textarea 加 `box-sizing:border-box; max-width:100%`, 长行不再贴边.
+- `GET /api/conversations` 加 `Cache-Control:no-store` 防浏览器缓存旧列表.
+- 前端 `loadConversations()` 加递增序号 (`loadSeq`), 丢弃陈旧响应避免并发乱序覆盖.
+
+**会话删除修复 (conversation.go / handlers_chat.go)**
+- `Conversation` 结构体没有 json tag, Go 默认输出大写字段名 (`ID`/`Title`/`UpdatedAt`).
+- 前端 JS 用 `c.id` / `c.title` 取值, 永远拿到 `undefined`.
+- `JSON.stringify({..., conversation_id: undefined})` 会丢弃该键, 删除请求体里只有 `{"action":"delete"}`.
+- 修复: 给 `Conversation` 加 `json:"id"`, `json:"title"`, `json:"updated_at"` tag.
+- 幂等删除: server 对不存在的 id 仍返回 `ok:true` (不返回 404), 前端不再依赖 existed 字段.
+
+### 提交
+
+- `a7d4bb3` fix(web): 会话 JSON 键名改为小写, 删除按钮不再丢失 conversation_id; 列表 API 加 no-store 防缓存; 前端 loadConversations 加请求序号避免并发响应乱序
+
+---
+
 ## 2026-06-14 — M1 完成
 
 里程碑: M1 — 多轮对话 + Prompt 工程
