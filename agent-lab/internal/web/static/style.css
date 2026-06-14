@@ -291,3 +291,94 @@ dl.kv {
 dl.kv dt { color: var(--muted); font-size: 13px; }
 dl.kv dd { margin: 0; font-size: 13px; }
 dl.kv dd code { font-family: var(--mono); }
+
+/* tools page (M2) */
+.tools-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 16px;
+  padding: 20px;
+  overflow: auto;
+}
+.tools-page h2 { font-size: 14px; margin: 0 0 12px; color: var(--muted); }
+.tool-cards { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 12px; }
+.tool-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+.tool-card header { display: flex; align-items: center; gap: 8px; }
+.tool-name { font-family: var(--mono); font-size: 13px; color: var(--accent); }
+.tool-desc { color: var(--fg); font-size: 13px; line-height: 1.6; margin: 6px 0 8px; white-space: pre-wrap; }
+.tool-card details { margin-top: 8px; }
+.tool-card details + details { margin-top: 10px; }
+.tool-card details[open] { padding-bottom: 4px; }
+.tool-card details[open] > *:not(summary) { margin-top: 8px; }
+.tool-card details summary {
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 0;
+  list-style-position: inside;
+}
+.tool-card details[open] summary { margin-bottom: 4px; }
+.schema-block,
+.invoke-result,
+.recent-args,
+.recent-body {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 8px 10px;
+  overflow: auto;
+  max-height: 280px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 6px 0;
+  box-sizing: border-box;
+  max-width: 100%;
+  display: block;
+}
+/* 空结果不显示空盒子, 避免出现"黑边". */
+.invoke-result:empty,
+.recent-args:empty,
+.recent-body:empty { display: none; }
+.tool-args {
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 8px 10px;
+  background: var(--bg);
+  color: var(--fg);
+  resize: vertical;
+  box-sizing: border-box;
+}
+.tool-args::placeholder { color: var(--muted); opacity: 0.7; }
+.tool-actions { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.invoke-btn { padding: 4px 12px; font-size: 12px; }
+.fill-example {
+  padding: 4px 10px;
+  font-size: 12px;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--line);
+}
+.fill-example:hover { border-color: var(--accent); color: var(--accent); }
+
+.recent-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.recent-empty { color: var(--muted); font-size: 12px; padding: 12px; text-align: center; }
+.recent-item {
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--ok);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+}
+.recent-item.err { border-left-color: var(--danger); }
+.recent-head { display: flex; justify-content: space-between; align-items: center; }

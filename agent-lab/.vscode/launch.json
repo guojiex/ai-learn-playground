@@ -1,0 +1,40 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "agent-lab: web (debug)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/web",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "OPENAI_BASE_URL": "http://127.0.0.1:18080/v1",
+        "OPENAI_API_KEY": "sk-local",
+        "AGENTLAB_PROFILE": "L"
+      }
+    },
+    {
+      "name": "agent-lab: chat CLI (debug)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/chat",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": {
+        "OPENAI_BASE_URL": "http://127.0.0.1:18080/v1",
+        "OPENAI_API_KEY": "sk-local",
+        "AGENTLAB_PROFILE": "L"
+      }
+    },
+    {
+      "name": "agent-lab: fake-openai (debug)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/scripts/fake-openai",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}

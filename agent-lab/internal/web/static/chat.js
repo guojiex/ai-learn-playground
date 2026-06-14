@@ -105,19 +105,29 @@
 
   async function deleteConversation(id) {
     if (!confirm("确认删除这个会话?")) return;
-    const resp = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "delete", conversation_id: id }),
-    });
-    if (resp.ok) {
-      if (id === currentConv) {
-        currentConv = "";
-        currentTitle = "";
-        $messages.innerHTML = "";
-      }
-      loadConversations();
+    // 乐观删除: 先从 DOM 上拿掉这一条, 让 UI 立即响应.
+    const li = $convList.querySelector(`li.conv-item[data-id="${cssEscape(id)}"]`);
+    if (li) li.remove();
+    if (id === currentConv) {
+      currentConv = "";
+      currentTitle = "";
+      $messages.innerHTML = "";
     }
+    try {
+      await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", conversation_id: id }),
+      });
+    } catch (_) { /* 网络错误也照样最终对账, 否则永远删不掉 */ }
+    // 与服务端对账, 防止幽灵条目残留.
+    loadConversations();
+  }
+
+  // cssEscape 兼容老浏览器, 处理 conv id 里可能出现的特殊字符.
+  function cssEscape(s) {
+    if (window.CSS && CSS.escape) return CSS.escape(s);
+    return String(s).replace(/[^a-zA-Z0-9_\-]/g, (ch) => "\\" + ch);
   }
 
   $newConv.addEventListener("click", async () => {

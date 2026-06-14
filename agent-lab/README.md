@@ -34,7 +34,9 @@
 | 设计文档 | 完成 |
 | M0 代码 | 完成 (`cmd/chat` + `internal/llm` + `internal/config` + fake server) |
 | M0 Web UI | 完成 (`cmd/web` + `internal/web`, SSE 流式 + 占位面板) |
-| M1–M11 代码 | 未开始 |
+| M1 代码 | 完成 (`internal/memory` + `internal/prompt` + 多会话 / 角色卡 / 摘要压缩) |
+| M2 代码 | 完成 (`internal/tools` + `internal/agent` + `cmd/agent` + Web `/tools`) |
+| M3–M11 代码 | 未开始 |
 
 ## M0 快速跑通
 

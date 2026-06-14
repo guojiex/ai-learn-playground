@@ -1,0 +1,53 @@
+{{define "content"}}
+  <header class="topbar">
+    <div class="topbar-title">
+      <h1>Tools</h1>
+      <span class="muted">M2 · 已注册工具与最近调用</span>
+    </div>
+    <div class="topbar-meta">
+      <span class="chip">profile <strong>{{.Profile}}</strong></span>
+      <span class="chip">model <strong>{{.Model}}</strong></span>
+    </div>
+  </header>
+
+  <section class="tools-page">
+    <section class="tools-list">
+      <h2>已注册工具</h2>
+      {{if .Schemas}}
+        <ul class="tool-cards">
+          {{range .Schemas}}
+            <li class="tool-card">
+              <header>
+                <code class="tool-name">{{.Name}}</code>
+              </header>
+              <p class="tool-desc">{{.Description}}</p>
+              <details>
+                <summary>JSON Schema</summary>
+                <pre><code class="schema-block">{{.Params}}</code></pre>
+              </details>
+              <details>
+                <summary>试调用 (DryRun)</summary>
+                <textarea class="tool-args" data-name="{{.Name}}" rows="3" placeholder="{{.Example}}"></textarea>
+                <div class="tool-actions">
+                  <button class="invoke-btn" data-name="{{.Name}}" type="button">调用</button>
+                  <button class="fill-example" data-example="{{.Example}}" type="button">填示例</button>
+                  <span class="invoke-status muted"></span>
+                </div>
+                <pre class="invoke-result"></pre>
+              </details>
+            </li>
+          {{end}}
+        </ul>
+      {{else}}
+        <p class="muted">没有注册任何工具.</p>
+      {{end}}
+    </section>
+
+    <section class="tools-recent">
+      <h2>最近调用 <span class="muted" id="recent-count"></span></h2>
+      <ul id="recent-list" class="recent-list"></ul>
+    </section>
+  </section>
+
+  <script src="/static/tools.js" defer></script>
+{{end}}

@@ -165,11 +165,11 @@ func (s *Server) handleChatRename(w http.ResponseWriter, req chatAPIRequest) {
 }
 
 func (s *Server) handleChatDelete(w http.ResponseWriter, req chatAPIRequest) {
-	if !s.convs.Delete(req.ConvID) {
-		writeJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	// 幂等删除: 即使 id 不存在 (例如 server 重启后的"幽灵会话"), 也返回 ok,
+	// 让前端可以放心地刷新列表把它清掉.
+	existed := s.convs.Delete(req.ConvID)
+	fmt.Printf("[chat] delete id=%q existed=%v remaining=%d\n", req.ConvID, existed, len(s.convs.List()))
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "existed": existed})
 }
 
 func (s *Server) handleChatSetSystem(w http.ResponseWriter, req chatAPIRequest) {
@@ -330,13 +330,11 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request, req chat
 	}
 	// 把回复写入历史.
 	conv.Memory.Append(llm.RoleAssistant, sb.String())
-	// 更新标题 (如果是首条消息).
+	// 更新标题 (如果是首条消息), 仅在能从消息里抽到非空首句时更新, 避免把 title 覆盖成空字符串.
 	if len(conv.Memory.Messages()) <= 2 {
-		first := firstLine(req.Message)
-		if len(first) > 20 {
-			first = first[:20]
+		if first := firstLine(req.Message); first != "" {
+			conv.Title = truncRunes(first, 20)
 		}
-		conv.Title = first
 	}
 	s.convs.Touch(conv.ID)
 
@@ -345,9 +343,21 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request, req chat
 
 func firstLine(s string) string {
 	if idx := strings.IndexAny(s, "\n\r"); idx >= 0 {
-		return strings.TrimSpace(s[:idx])
+		s = s[:idx]
 	}
 	return strings.TrimSpace(s)
+}
+
+// truncRunes 按 rune 截断, 避免在中文字节中间切断造成乱码.
+func truncRunes(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
 
 // writeSSE 把 (event, data) 写成 SSE 帧并 flush.

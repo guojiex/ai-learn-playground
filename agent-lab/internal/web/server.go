@@ -14,6 +14,7 @@ import (
 	"ai-learn-playground/agent-lab/internal/config"
 	"ai-learn-playground/agent-lab/internal/llm"
 	"ai-learn-playground/agent-lab/internal/prompt"
+	"ai-learn-playground/agent-lab/internal/tools"
 )
 
 // Server 是 web 模块的入口对象.
@@ -23,40 +24,70 @@ type Server struct {
 	pages     map[string]*template.Template
 	static    http.FileSystem
 	convs     *ConversationStore
+	tools     *tools.Registry
+	toolHist  *ToolRecentBuffer
 	defaultSystem string
 	budget    int
 	reserve   int
 }
 
-// NewServer 装配模板与静态资源, 返回可挂载的 Server.
-func NewServer(cfg config.Config, client llm.Client) (*Server, error) {
-	pages, err := loadTemplates()
-	if err != nil {
-		return nil, err
+// ServerOption 用于自定义 NewServer 行为.
+type ServerOption func(*Server)
+
+// WithToolRegistry 注入一个 tools.Registry, 启用 /tools 面板.
+func WithToolRegistry(reg *tools.Registry) ServerOption {
+	return func(s *Server) {
+		s.tools = reg
 	}
+}
+
+// NewServer 装配模板与静态资源, 返回可挂载的 Server.
+func NewServer(cfg config.Config, client llm.Client, opts ...ServerOption) (*Server, error) {
 	sub, err := fs.Sub(staticFS, "static")
 	if err != nil {
 		return nil, err
 	}
 	p := prompt.Default()
-	return &Server{
+	s := &Server{
 		cfg:           cfg,
 		llm:           client,
-		pages:         pages,
 		static:        http.FS(sub),
 		convs:         NewConversationStore(),
+		toolHist:      NewToolRecentBuffer(50),
 		defaultSystem: p.SystemPrompt,
 		budget:        2048,
 		reserve:       512,
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	pages, err := loadTemplates(s.enabledNav())
+	if err != nil {
+		return nil, err
+	}
+	s.pages = pages
+	return s, nil
+}
+
+// enabledNav 返回当前 server 启用了哪些非占位面板, 给模板 navItems 用.
+func (s *Server) enabledNav() map[string]bool {
+	enabled := map[string]bool{
+		"/chat":     true,
+		"/settings": true,
+		"/tutorial": true,
+	}
+	if s.tools != nil {
+		enabled["/tools"] = true
+	}
+	return enabled
 }
 
 // Routes 返回挂载好的 http.Handler.
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 
-	// 静态资源.
-	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(s.static)))
+	// 静态资源. 开发期禁用浏览器缓存, 否则改了 css/js 强刷也常常拿到旧版.
+	mux.Handle("/static/", http.StripPrefix("/static/", noCache(http.FileServer(s.static))))
 
 	// 健康检查.
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -78,12 +109,23 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/chat", s.handleChatAPI)
 	mux.HandleFunc("/api/conversations", s.handleConversationsAPI)
 
+	// Tools 面板 (M2): 仅在注入 Registry 时启用.
+	if s.tools != nil {
+		mux.HandleFunc("/tools", s.handleToolsPage)
+		mux.HandleFunc("/api/tools/recent", s.handleToolsRecent)
+		mux.HandleFunc("/api/tools/invoke", s.handleToolsInvoke)
+	}
+
 	// 教程页.
 	mux.HandleFunc("/tutorial", s.handleTutorial)
 
 	// 占位面板 (各里程碑陆续替换).
 	for _, p := range placeholders() {
 		p := p
+		// 已实装的面板跳过占位注册.
+		if p.Path == "/tools" && s.tools != nil {
+			continue
+		}
 		mux.HandleFunc(p.Path, func(w http.ResponseWriter, r *http.Request) {
 			s.renderPlaceholder(w, p)
 		})
@@ -93,9 +135,11 @@ func (s *Server) Routes() http.Handler {
 }
 
 // loadTemplates 为每个 page 单独构造一棵 template tree.
-func loadTemplates() (map[string]*template.Template, error) {
-	funcs := template.FuncMap{"navItems": navItems}
-	pages := []string{"chat.html", "placeholder.html", "settings.html"}
+func loadTemplates(enabled map[string]bool) (map[string]*template.Template, error) {
+	funcs := template.FuncMap{
+		"navItems": func(active string) []NavItem { return navItems(active, enabled) },
+	}
+	pages := []string{"chat.html", "placeholder.html", "settings.html", "tools.html"}
 	out := make(map[string]*template.Template, len(pages))
 	var err error
 	for _, p := range pages {
@@ -144,5 +188,15 @@ func logging(h http.Handler) http.Handler {
 		rec := &statusRecorder{ResponseWriter: w, status: 200}
 		h.ServeHTTP(rec, r)
 		fmt.Printf("[web] %s %s -> %d\n", r.Method, r.URL.Path, rec.status)
+	})
+}
+
+// noCache 禁用浏览器对静态资源的缓存, 避免改 css/js 后强刷仍命中旧版.
+func noCache(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store, must-revalidate")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		h.ServeHTTP(w, r)
 	})
 }

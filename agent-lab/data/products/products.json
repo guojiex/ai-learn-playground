@@ -1,0 +1,35 @@
+[
+  {
+    "id": "sku_001",
+    "name": "今治本舗 純棉吸水浴巾",
+    "brand": "今治本舗",
+    "origin": "日本",
+    "spec": "70x140 cm, 480g",
+    "price_twd": 690,
+    "shipping": "現貨 / 24h 出貨",
+    "highlights": ["蓬鬆", "不掉毛", "高吸水", "日本製"],
+    "platforms": ["shopee_tw", "pchome", "momo"]
+  },
+  {
+    "id": "sku_002",
+    "name": "韓系毛絨保暖室內拖鞋",
+    "brand": "暖蓬",
+    "origin": "韓國",
+    "spec": "23-27 cm, 多色可選",
+    "price_twd": 290,
+    "shipping": "滿 NT$399 免運",
+    "highlights": ["靜音底", "防滑", "毛絨保暖"],
+    "platforms": ["shopee_tw", "momo"]
+  },
+  {
+    "id": "sku_003",
+    "name": "316不鏽鋼真空保溫瓶",
+    "brand": "鐵漢牌",
+    "origin": "台灣",
+    "spec": "500 ml, 銀/黑/粉",
+    "price_twd": 480,
+    "shipping": "限時免運",
+    "highlights": ["12小時保溫", "316食品級", "輕量耐摔"],
+    "platforms": ["shopee_tw", "pchome"]
+  }
+]

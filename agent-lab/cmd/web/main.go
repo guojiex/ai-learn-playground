@@ -23,12 +23,17 @@ import (
 
 	"ai-learn-playground/agent-lab/internal/config"
 	"ai-learn-playground/agent-lab/internal/llm"
+	"ai-learn-playground/agent-lab/internal/tools"
 	"ai-learn-playground/agent-lab/internal/web"
 )
 
 func main() {
-	var addr string
+	var (
+		addr    string
+		dataDir string
+	)
 	flag.StringVar(&addr, "addr", "127.0.0.1:8090", "listen address")
+	flag.StringVar(&dataDir, "data", "agent-lab/data/products", "tools 工具用的 products.json 所在目录")
 	flag.Parse()
 
 	cfg, err := config.Load()
@@ -42,7 +47,15 @@ func main() {
 		cfg.BaseURL, cfg.APIKey, cfg.RequestTimeout,
 		llm.WithMaxRetries(cfg.MaxRetries),
 	)
-	srv, err := web.NewServer(cfg, client)
+
+	reg := tools.NewRegistry()
+	reg.Register(tools.NewProductLookup(dataDir))
+	reg.Register(tools.NewPriceFormat())
+	reg.Register(tools.NewPlatformLint())
+	reg.Register(tools.NewSlangCheck())
+	fmt.Fprintf(os.Stderr, "[agent-lab] tools=%v\n", reg.Names())
+
+	srv, err := web.NewServer(cfg, client, web.WithToolRegistry(reg))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "init server:", err)
 		os.Exit(1)

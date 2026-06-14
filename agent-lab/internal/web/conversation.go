@@ -53,15 +53,19 @@ func (s *ConversationStore) Get(id string) *Conversation {
 	return s.data[id]
 }
 
-// List 返回所有会话, 按更新时间倒序.
+// List 返回所有会话, 按更新时间倒序. title 为空时给一个时间兜底.
 func (s *ConversationStore) List() []Conversation {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]Conversation, 0, len(s.data))
 	for _, c := range s.data {
+		title := c.Title
+		if title == "" {
+			title = "新对话 " + c.UpdatedAt.Format("15:04")
+		}
 		out = append(out, Conversation{
 			ID:        c.ID,
-			Title:     c.Title,
+			Title:     title,
 			UpdatedAt: c.UpdatedAt,
 		})
 	}

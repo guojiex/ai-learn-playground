@@ -11,8 +11,8 @@ type NavItem struct {
 	Active   bool
 }
 
-// navItems 给模板 FuncMap 调用.
-func navItems(active string) []NavItem {
+// navItems 给模板 FuncMap 调用. enabled 标记哪些路径已实装 (非 disabled).
+func navItems(active string, enabled map[string]bool) []NavItem {
 	defs := []NavItem{
 		{Path: "/chat", Label: "Chat", Icon: "chat"},
 		{Path: "/tools", Label: "Tools", Icon: "tool", Disabled: true},
@@ -25,6 +25,9 @@ func navItems(active string) []NavItem {
 		{Path: "/tutorial", Label: "Tutorial", Icon: "book"},
 	}
 	for i := range defs {
+		if enabled[defs[i].Path] {
+			defs[i].Disabled = false
+		}
 		if defs[i].Path == active {
 			defs[i].Active = true
 		}

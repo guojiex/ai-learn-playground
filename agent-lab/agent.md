@@ -5,6 +5,106 @@
 
 ---
 
+## 2026-06-14 — M2 完成 (Tool Calling)
+
+里程碑: M2 — 原生 function calling + 工具回环
+
+### 已实现
+
+**新模块: internal/tools/**
+- `tool.go`: `Tool` 接口 (`Schema()` + `Invoke(ctx, args)`) + `Registry` 并发安全注册表 + `Schema()` helper + `ParseArgs()` helper.
+- `product_lookup.go`: 按 id 精确或 query 模糊查询 `data/products/products.json`, 内置文件指纹缓存.
+- `price_format.go`: 把 price + shipping + badges 拼成 `NT$690 · 現貨 · 限時免運` 格式.
+- `platform_lint.go`: 校验 shopee_tw / pchome / momo 的字数 / 禁词 / 标签数, 返回 violations 列表.
+- `slang_check.go`: 统计台湾电商黑话命中数与每千字密度.
+
+**新模块: internal/agent/tooling.go**
+- `Loop(ctx, client, registry, messages, opts)`: tool-calling 主循环.
+  - 调 LLM → 拿到 tool_calls → `errgroup` 风格并发执行 → role=tool 回填 → 再调 LLM.
+  - finish=stop 或无 tool_calls 时收敛; 达到 MaxSteps (默认 8) 报错.
+  - 工具错误以 `{"error": ...}` JSON 回填, 模型可重试; 不打断循环.
+  - 返回 `Result{FinalMessage, Steps, ToolCalls, Usage}`, 其中 `ToolCallRecord` 含 args / result / err / duration_ms.
+
+**新 CLI: cmd/agent/main.go**
+- `-m <message>` + `-data <dir>` + `-max-steps`, 调用 `agent.Loop`.
+- 把每次 tool call 输出到 stderr (含耗时 / 摘要).
+
+**Web 增量 (替换 /tools 占位)**
+- `internal/web/handlers_tools.go`: `/tools` 页面 + `/api/tools/recent` + `/api/tools/invoke` (UI 试调用).
+- `internal/web/tools_recent.go`: 进程内最近 50 条调用环形缓冲.
+- `internal/web/server.go`: 引入 `ServerOption` + `WithToolRegistry`; 注入 registry 时启用 `/tools` 路由并把 nav 项的 disabled 取消.
+- `templates/tools.html` + `static/tools.js` + `style.css` 中的 `.tools-page` / `.tool-card` / `.recent-list` 样式.
+- `cmd/web/main.go`: 默认注册 4 个工具到 web server.
+
+**测试**
+- `internal/tools/tools_test.go`: 8 条用例覆盖 4 个工具的成功 / 失败路径与 Registry.
+- `internal/agent/tooling_test.go`: 5 条用例 (stop / 单工具 / 并行 / 未知工具回填 / max-steps 守护).
+- `internal/web/handlers_tools_test.go`: 5 条用例 (页面渲染 / invoke ok / unknown / recent buffer / 未注入时走占位).
+
+### 文件清单
+
+```
+agent-lab/
+├── cmd/
+│   ├── agent/main.go                    (新, M2 CLI)
+│   └── web/main.go                      (改, 注入 tools registry)
+├── internal/
+│   ├── tools/                           (新)
+│   │   ├── tool.go
+│   │   ├── product_lookup.go
+│   │   ├── price_format.go
+│   │   ├── platform_lint.go
+│   │   ├── slang_check.go
+│   │   └── tools_test.go
+│   ├── agent/                           (新)
+│   │   ├── tooling.go
+│   │   └── tooling_test.go
+│   └── web/
+│       ├── server.go                    (改, ServerOption)
+│       ├── nav.go                       (改, enabled map)
+│       ├── handlers_tools.go            (新)
+│       ├── handlers_tools_test.go       (新)
+│       ├── tools_recent.go              (新)
+│       ├── templates/tools.html         (新)
+│       └── static/tools.js              (新)
+└── data/products/products.json          (新, 3 条 sku 示例)
+```
+
+### 启动方式
+
+CLI (需要支持 function calling 的真实模型, 例如 Qwen2.5-Instruct):
+
+```powershell
+$env:OPENAI_BASE_URL="http://127.0.0.1:8080/v1"
+$env:OPENAI_API_KEY="sk-local"
+$env:AGENTLAB_PROFILE="L"
+go run ./agent-lab/cmd/agent -m "帮我为 sku_001 写一段蝦皮标题, 要带現貨/免運"
+```
+
+Web (Tools 面板可独立试调用所有工具, 不依赖 LLM):
+
+```powershell
+go run ./agent-lab/cmd/web
+# 浏览器打开 http://127.0.0.1:8090/tools
+```
+
+### 验收
+
+- [x] Registry 批量注册 / Schemas() 直接喂给 LLM
+- [x] agent loop 最多 N 步 (默认 8), 超过报错
+- [x] 工具错误以 role=tool 回填给模型
+- [x] 多个 tool_calls 并发执行 (sync.WaitGroup), 顺序保持入参顺序
+- [x] 单测覆盖回环逻辑, 不依赖真模型
+- [x] /tools 面板列出 schema + 最近调用 + 试调用框
+
+### 衔接
+
+下一站候选:
+- M3 (手写 ReAct, 与 M2 互为对照)
+- M4 (在 M2 agent 上加短期 + 长期记忆 + SQLite)
+
+---
+
 ## 2026-06-14 — M1 完成
 
 里程碑: M1 — 多轮对话 + Prompt 工程
