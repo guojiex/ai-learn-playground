@@ -5,6 +5,100 @@
 
 ---
 
+## 2026-06-14 — M3 完成 (手写 ReAct Agent)
+
+里程碑: M3 — 不依赖原生 function calling 的 ReAct 协议, 与 M2 互为对照
+
+### 已实现
+
+**统一 Agent 接口: internal/agent/agent.go**
+- `Agent` 接口: `Run(ctx, msg) (RunResult, error)` + `Mode()`
+- 共享类型 `Step{kind, thought, action_name, action_args, observation, error, elapsed_ms}`
+- 共享类型 `RunResult{final, steps, mode, elapsed, usage}`
+- `Options{SystemPrompt, Model, Temperature, MaxTokens, MaxSteps}` 两种模式共用
+
+**JSON 解析容错: internal/agent/parse.go**
+- `ParseReAct(raw)` 按优先级尝试: 整块 JSON → 代码块 ```json...``` → 裸代码块 → 最外层 {...}
+- 对每种候选再做 "单引号→双引号" 的宽容解析, 覆盖小模型常输出的 `{'name':'foo'}` 格式
+- 协议校验: 必须有 `final` 或 `action`, 否则当解析异常处理
+- 相关工具: `extractFenced / extractFirstBracePair / normalizeSingleQuotes / truncateForError`
+
+**ReActAgent 主循环: internal/agent/react.go**
+- `ReActSystemPrompt(baseSystem, toolNames)` 动态注入工具列表
+- 主循环: 调 LLM → ParseReAct → final 收敛 或 action 调用工具 → 把 observation 以 user 角色追加
+- 解析失败策略: 第一次发 "你的输出不符合 JSON 协议" 让模型重试; 第二次降级把原文当 final
+- MaxSteps 守护: 超过上限返回 `ErrMaxSteps`
+- `invokeTool`: 未知工具 / args 解析失败统一返回 JSON 错误, 让模型自行重试
+
+**NativeAgent 包装: internal/agent/native.go**
+- 把 M2 `Loop()` 包装成 `Agent` 接口, 方便同一份 Web/CLI 在两种模式间切换对照
+
+**CLI: cmd/agent/main.go 加 `--mode` 切换**
+- 默认 `native` (M2 原生 function calling), 传 `--mode=react` 走 M3 JSON 协议
+- 支持 `--temperature` / `--max-tokens` / `--max-steps` 全流程共享参数
+
+**Web Chat UI 改造: internal/web/handlers_chat.go + templates/chat.html + static/chat.js**
+- `POST /api/chat` 新增 `mode` 字段: `native`(默认) 或 `react`
+- `handleChatSendReact`: 调用 `ReActAgent.Run()`, 对每个 step 发 SSE `step` 事件, 最后发 `final` + `done`
+- `handleChatSendNative`: 保留原有的 ChatStream 增量流式
+- `chat.html` 作曲家选项区: mode 下拉 + temperature 数字 + max_tokens 数字
+- `chat.js` 新增 `addStepCard()` 渲染 step (thought / action / observation / error 分区), 处理 `start / step / final / delta` 事件
+- `style.css` 新增 `.composer-options` 工具条样式和 `.msg.step-card` 反应式卡片样式
+
+**测试**
+- `internal/agent/react_test.go`: 多条用例 (final 直接收敛 / action 调用工具 / max-steps / 解析失败降级 / 未知工具)
+- `internal/web/handlers_chat_test.go`: 已有的 send 流式用例对两种模式回归
+
+### 文件清单 (相对 agent-lab)
+
+```
+├── cmd/agent/main.go                     (改, 加 --mode=react|native)
+├── internal/agent/
+│   ├── agent.go                          (新, Agent 接口 + 共享类型 + Options)
+│   ├── parse.go                          (新, JSON 提取 + 代码块容错)
+│   ├── react.go                          (新, ReActAgent 主循环)
+│   ├── native.go                         (新, 包装 tooling.go Loop 为 Agent)
+│   └── react_test.go                     (新)
+└── internal/web/
+    ├── handlers_chat.go                  (改, 路由 react / native, 发 step SSE)
+    ├── templates/chat.html              (改, composer-options 区)
+    └── static/
+        ├── chat.js                       (改, mode 参数 + step/final 事件渲染 + escapeHtml)
+        └── style.css                     (改, composer-options + step-card 样式)
+```
+
+### 启动方式
+
+CLI:
+
+```powershell
+$env:OPENAI_BASE_URL="http://127.0.0.1:8080/v1"
+$env:OPENAI_API_KEY="sk-local"
+$env:AGENTLAB_PROFILE="L"
+# M3 手写 ReAct (JSON 协议, 不需要 function calling)
+go run ./agent-lab/cmd/agent --mode=react -m "为 sku_001 写一段標題"
+# M2 对照
+go run ./agent-lab/cmd/agent --mode=native -m "为 sku_001 写一段標題"
+```
+
+Web:
+
+```powershell
+go run ./agent-lab/cmd/web
+# http://127.0.0.1:8090/chat  → composer 上方的 mode 下拉切换 native / react
+```
+
+### 验收
+
+- [x] `Agent` 接口: NativeAgent / ReActAgent 都能 Run 并返回 RunResult
+- [x] ParseReAct 对代码块 / 单引号 / 裸 JSON 三种格式都能解析
+- [x] ReActAgent 能调用 tools registry 并把 observation 回填
+- [x] CLI `--mode=react` 与 `--mode=native` 都能跑通
+- [x] Web Chat 切换 react 模式后, step 卡片逐条渲染, 最后显示 final
+- [x] `go vet ./...` / `go build ./...` / `go test ./...` 全部通过
+
+---
+
 ## 2026-06-14 — M2 完成 (Tool Calling)
 
 里程碑: M2 — 原生 function calling + 工具回环

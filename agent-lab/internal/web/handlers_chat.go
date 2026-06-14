@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"ai-learn-playground/agent-lab/internal/agent"
 	"ai-learn-playground/agent-lab/internal/llm"
 )
 
@@ -42,14 +43,15 @@ func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
 // chatAPIRequest 是浏览器发来的一条聊天请求.
 // 支持: 新建消息 / 切换会话 / 编辑角色卡 / 重置 / 导出/导入历史.
 type chatAPIRequest struct {
-	Action       string            `json:"action"`        // "send" | "new" | "rename" | "delete" | "switch" | "set_system" | "reset" | "export" | "load"
-	ConvID       string            `json:"conversation_id"`
-	Title        string            `json:"title"`
-	System       string            `json:"system"`
-	Message      string            `json:"message"`
+	Action       string             `json:"action"`        // "send" | "new" | "rename" | "delete" | "switch" | "set_system" | "reset" | "export" | "load"
+	ConvID       string             `json:"conversation_id"`
+	Title        string             `json:"title"`
+	System       string             `json:"system"`
+	Message      string             `json:"message"`
 	Messages     []chatHistoryEntry `json:"messages"`
-	Temp         float32           `json:"temperature"`
-	Max          int               `json:"max_tokens"`
+	Temp         float32            `json:"temperature"`
+	Max          int                `json:"max_tokens"`
+	Mode         string             `json:"mode"`           // "native" (default) | "react"
 }
 
 type chatHistoryEntry struct {
@@ -238,21 +240,20 @@ func (s *Server) handleChatLoad(w http.ResponseWriter, req chatAPIRequest) {
 }
 
 // handleChatSend 发送一条消息给 LLM, 用 SSE 流式回复.
+// 根据 req.Mode:
+//   - "native" (默认): 使用 OpenAI 兼容协议的原生函数调用, 走 ChatStream 增量流式.
+//   - "react":          使用 M3 手写的 ReAct 协议 (thought-action-observation JSON), 逐步吐出 step 事件.
 func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request, req chatAPIRequest) {
 	req.Message = strings.TrimSpace(req.Message)
 	if req.Message == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "message is required"})
 		return
 	}
-	// 拿到或创建会话.
 	conv := s.convs.Get(req.ConvID)
 	if conv == nil {
 		conv = s.convs.New(req.ConvID, "", s.defaultSystem, s.budget, s.reserve)
 	}
-
 	conv.Memory.Append(llm.RoleUser, req.Message)
-
-	// 压缩检查
 	info, cerr := conv.Memory.EnsureBudget(r.Context(), s.llm, s.cfg.ModelChat, req.Max)
 	if cerr != nil {
 		fmt.Printf("[chat] memory: %v\n", cerr)
@@ -272,7 +273,6 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request, req chat
 	h.Set("Connection", "keep-alive")
 	h.Set("X-Accel-Buffering", "no")
 
-	// 如果发生了压缩, 先推一条 summary 事件.
 	if info.DidCompress {
 		writeSSE(w, flusher, "summary", map[string]any{
 			"before_turns": info.BeforeTurns,
@@ -282,9 +282,18 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request, req chat
 		})
 	}
 
-	// 组装 messages.
-	msgs := conv.Memory.Snapshot()
+	// 路由: react 模式走主循环, 其他走原生 ChatStream.
+	mode := strings.ToLower(strings.TrimSpace(req.Mode))
+	if mode == "react" {
+		s.handleChatSendReact(w, r, req, conv, flusher)
+		return
+	}
+	s.handleChatSendNative(w, r, req, conv, flusher)
+}
 
+// handleChatSendNative 沿用现有的 ChatStream 增量流式路径.
+func (s *Server) handleChatSendNative(w http.ResponseWriter, r *http.Request, req chatAPIRequest, conv *Conversation, flusher http.Flusher) {
+	msgs := conv.Memory.Snapshot()
 	temp := req.Temp
 	if temp <= 0 {
 		temp = 0.4
@@ -299,13 +308,12 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request, req chat
 		Temperature: &temp,
 		MaxTokens:   &mt,
 	}
-
 	stream, err := s.llm.ChatStream(r.Context(), chatReq)
 	if err != nil {
 		writeSSE(w, flusher, "error", map[string]any{"message": err.Error()})
 		return
 	}
-	writeSSE(w, flusher, "start", map[string]any{"model": s.cfg.ModelChat, "conversation_id": conv.ID})
+	writeSSE(w, flusher, "start", map[string]any{"model": s.cfg.ModelChat, "conversation_id": conv.ID, "mode": "native"})
 
 	var sb strings.Builder
 	for chunk := range stream {
@@ -332,16 +340,65 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request, req chat
 			})
 		}
 	}
-	// 把回复写入历史.
-	conv.Memory.Append(llm.RoleAssistant, sb.String())
-	// 更新标题 (如果是首条消息), 仅在能从消息里抽到非空首句时更新, 避免把 title 覆盖成空字符串.
+	s.finalizeChatSend(w, conv, req, flusher, sb.String())
+}
+
+// handleChatSendReact 使用 ReActAgent 驱动 thought-action-observation 主循环.
+// 每个 step 吐出一条 SSE step 事件, 最后吐出 final 事件.
+func (s *Server) handleChatSendReact(w http.ResponseWriter, r *http.Request, req chatAPIRequest, conv *Conversation, flusher http.Flusher) {
+	systemPrompt := s.defaultSystem
+	if strings.TrimSpace(conv.Memory.System()) != "" {
+		systemPrompt = conv.Memory.System()
+	}
+
+	temp := req.Temp
+	if temp <= 0 {
+		temp = 0.4
+	}
+	opts := agent.Options{
+		SystemPrompt: systemPrompt,
+		Model:        s.cfg.ModelChat,
+		Temperature:  temp,
+		MaxTokens:    req.Max,
+	}
+	agentImpl := agent.NewReActAgent(s.llm, s.tools, opts)
+	writeSSE(w, flusher, "start", map[string]any{"model": s.cfg.ModelChat, "conversation_id": conv.ID, "mode": "react"})
+
+	res, err := agentImpl.Run(r.Context(), req.Message)
+	// 先把所有 step 事件吐出去.
+	for _, step := range res.Steps {
+		writeSSE(w, flusher, "step", map[string]any{
+			"step_index":  step.StepIndex,
+			"kind":        step.Kind,
+			"thought":     step.Thought,
+			"action_name": step.ActionName,
+			"action_args": step.ActionArgs,
+			"observation": step.Observation,
+			"error":       step.Error,
+			"elapsed_ms":  step.ElapsedMS,
+		})
+	}
+	finalText := strings.TrimSpace(res.Final)
+	if err != nil {
+		// 有错误时, 把错误信息作为 final 的补充, 不打断对话.
+		if finalText == "" {
+			finalText = "agent 运行失败: " + err.Error()
+		}
+		writeSSE(w, flusher, "error", map[string]any{"message": err.Error()})
+	}
+	writeSSE(w, flusher, "final", map[string]any{"content": finalText})
+	s.finalizeChatSend(w, conv, req, flusher, finalText)
+}
+
+// finalizeChatSend 写会话历史 / 更新标题 / 发 done 事件, 两种 mode 共用.
+func (s *Server) finalizeChatSend(w http.ResponseWriter, conv *Conversation, req chatAPIRequest, flusher http.Flusher, reply string) {
+	conv.Memory.Append(llm.RoleAssistant, reply)
 	if len(conv.Memory.Messages()) <= 2 {
 		if first := firstLine(req.Message); first != "" {
 			conv.Title = truncRunes(first, 20)
 		}
 	}
 	s.convs.Touch(conv.ID)
-
 	writeSSE(w, flusher, "done", map[string]any{"conversation_id": conv.ID, "title": conv.Title})
 }
 

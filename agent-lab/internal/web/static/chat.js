@@ -14,6 +14,9 @@
   const $status   = document.getElementById("status");
   const $newConv  = document.getElementById("new-conv");
   const $convList = document.getElementById("conv-list");
+  const $mode     = document.getElementById("mode");
+  const $temp     = document.getElementById("temperature");
+  const $maxTk    = document.getElementById("max-tokens");
 
   // 当前会话 ID, 初次为 "" (将在首次发送时由服务端生成).
   let currentConv = "";
@@ -251,6 +254,52 @@
     return el;
   }
 
+  function addStepCard(step) {
+    const card = document.createElement("div");
+    card.className = "msg step-card";
+    const header = document.createElement("div");
+    header.className = "step-header";
+    header.innerHTML = `<span class="step-index">step ${step.step_index}</span> <span class="step-kind">${escapeHtml(step.kind || "")}</span> <span class="step-time">${step.elapsed_ms ? step.elapsed_ms + " ms" : ""}</span>`;
+    card.appendChild(header);
+
+    const body = document.createElement("div");
+    body.className = "step-body";
+    if (step.thought) {
+      const b = document.createElement("div");
+      b.className = "step-row";
+      b.innerHTML = `<span class="step-label">thought</span><pre>${escapeHtml(step.thought)}</pre>`;
+      body.appendChild(b);
+    }
+    if (step.action_name) {
+      const b = document.createElement("div");
+      b.className = "step-row";
+      b.innerHTML = `<span class="step-label">action</span><pre>${escapeHtml(step.action_name)}${step.action_args ? " " + step.action_args : ""}</pre>`;
+      body.appendChild(b);
+    }
+    if (step.observation) {
+      const b = document.createElement("div");
+      b.className = "step-row";
+      b.innerHTML = `<span class="step-label">observation</span><pre>${escapeHtml(step.observation)}</pre>`;
+      body.appendChild(b);
+    }
+    if (step.error) {
+      const b = document.createElement("div");
+      b.className = "step-row";
+      b.innerHTML = `<span class="step-label">error</span><pre>${escapeHtml(step.error)}</pre>`;
+      body.appendChild(b);
+    }
+    card.appendChild(body);
+    $messages.appendChild(card);
+    $messages.scrollTop = $messages.scrollHeight;
+    return card;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[c]));
+  }
+
   function addNote(text) {
     const el = document.createElement("div");
     el.className = "msg note";
@@ -276,10 +325,15 @@
     addBubble("user", msg);
     $input.value = "";
 
+    const mode = ($mode && $mode.value) || "native";
+    const temperature = ($temp && $temp.value) ? parseFloat($temp.value) : 0.4;
+    const maxTokens = ($maxTk && $maxTk.value) ? parseInt($maxTk.value, 10) : 512;
+
     const assistantEl = addBubble("assistant", "", { streaming: true });
     let acc = "";
     let finishReason = "";
     let usage = null;
+    let hasAnyContent = false;
 
     abortCtrl = new AbortController();
     setBusy(true);
@@ -293,6 +347,9 @@
           conversation_id: currentConv,
           system: $system.value,
           message: msg,
+          mode: mode,
+          temperature: isNaN(temperature) ? 0.4 : temperature,
+          max_tokens: isNaN(maxTokens) ? 512 : maxTokens,
         }),
         signal: abortCtrl.signal,
       });
@@ -315,10 +372,14 @@
           buf = buf.slice(idx + 2);
           const evt = parseFrame(frame);
           if (!evt) continue;
-          if (evt.event === "start" && evt.data && evt.data.conversation_id) {
-            if (!currentConv) {
+          if (evt.event === "start" && evt.data) {
+            if (evt.data.conversation_id && !currentConv) {
               currentConv = evt.data.conversation_id;
             }
+            if (evt.data.mode === "react") {
+              addNote(`agent 模式: react`);
+            }
+            continue;
           }
           if (evt.event === "summary" && evt.data) {
             const d = evt.data;
@@ -326,9 +387,21 @@
             addNote(text);
             continue;
           }
+          if (evt.event === "step" && evt.data) {
+            addStepCard(evt.data);
+            continue;
+          }
+          if (evt.event === "final" && evt.data && evt.data.content) {
+            acc = evt.data.content;
+            assistantEl.textContent = acc;
+            hasAnyContent = true;
+            $messages.scrollTop = $messages.scrollHeight;
+            continue;
+          }
           if (evt.event === "delta" && evt.data && evt.data.content) {
             acc += evt.data.content;
             assistantEl.textContent = acc;
+            hasAnyContent = true;
             $messages.scrollTop = $messages.scrollHeight;
           } else if (evt.event === "finish" && evt.data) {
             finishReason = evt.data.reason || finishReason;
@@ -337,12 +410,16 @@
           } else if (evt.event === "error" && evt.data) {
             assistantEl.classList.add("error");
             assistantEl.textContent = "错误: " + (evt.data.message || "unknown");
+            hasAnyContent = true;
           } else if (evt.event === "canceled") {
             addNote("已停止");
           } else if (evt.event === "done" && evt.data && evt.data.conversation_id) {
             if (evt.data.title) currentTitle = evt.data.title;
           }
         }
+      }
+      if (!hasAnyContent && !acc) {
+        assistantEl.textContent = "(无回复)";
       }
     } catch (err) {
       if (err.name === "AbortError") {
@@ -356,6 +433,7 @@
       setBusy(false);
       abortCtrl = null;
       const parts = [];
+      if (mode) parts.push("mode=" + mode);
       if (finishReason) parts.push("finish=" + finishReason);
       if (usage) parts.push(`tokens=${usage.prompt_tokens}/${usage.completion_tokens}/${usage.total_tokens}`);
       $status.textContent = parts.join(" · ");
