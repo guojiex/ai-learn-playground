@@ -1,0 +1,114 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "fake-openai",
+      "detail": "台湾电商文案模拟器（OpenAI 兼容协议，http://127.0.0.1:18080/v1）",
+      "type": "shell",
+      "command": "go run ./scripts/fake-openai",
+      "options": { "cwd": "${workspaceFolder}" },
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true,
+        "group": "agent-lab"
+      },
+      "problemMatcher": {
+        "pattern": {
+          "regexp": "^$",
+          "file": 1,
+          "location": 2,
+          "message": 3
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^fake-openai.*",
+          "endsPattern": "^fake-openai.*listening.*$"
+        }
+      }
+    },
+    {
+      "label": "web",
+      "detail": "启动 Web UI（浏览器访问 http://127.0.0.1:8090）",
+      "type": "shell",
+      "command": "go run ./cmd/web",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "OPENAI_BASE_URL": "http://127.0.0.1:18080/v1",
+          "OPENAI_API_KEY": "sk-local",
+          "AGENTLAB_PROFILE": "L"
+        }
+      },
+      "isBackground": true,
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true,
+        "group": "agent-lab"
+      },
+      "problemMatcher": {
+        "pattern": {
+          "regexp": "^$",
+          "file": 1,
+          "location": 2,
+          "message": 3
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^\\[agent-lab\\].*",
+          "endsPattern": "^\\[web\\] listening.*$"
+        }
+      }
+    },
+    {
+      "label": "chat CLI (REPL)",
+      "detail": "进入命令行多轮对话 REPL 模式",
+      "type": "shell",
+      "command": "go run ./cmd/chat",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "OPENAI_BASE_URL": "http://127.0.0.1:18080/v1",
+          "OPENAI_API_KEY": "sk-local",
+          "AGENTLAB_PROFILE": "L"
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true,
+        "group": "agent-lab"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "build",
+      "detail": "编译 agent-lab 全目录（只构建，不产生可执行文件）",
+      "type": "shell",
+      "command": "go build ./...",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": "$go"
+    },
+    {
+      "label": "test",
+      "detail": "运行 agent-lab 全部单元测试",
+      "type": "shell",
+      "command": "go test ./...",
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": "$go"
+    },
+    {
+      "label": "🚀 一键启动全部 (fake + web)",
+      "detail": "先启 fake-openai（模拟器），再启 Web UI。浏览器访问 http://127.0.0.1:8090",
+      "dependsOrder": "sequence",
+      "dependsOn": ["fake-openai", "web"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}
