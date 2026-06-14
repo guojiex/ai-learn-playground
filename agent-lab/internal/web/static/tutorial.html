@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="zh-cmn-Hans">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>agent-lab · 设计教程</title>
+<style>
+  :root {
+    --fg: #1a1a1a;
+    --muted: #6b7280;
+    --bg: #fafaf7;
+    --panel: #ffffff;
+    --border: #e5e7eb;
+    --accent: #2563eb;
+    --accent-bg: #eff6ff;
+    --warn: #d97706;
+    --code-bg: #0f172a;
+    --code-fg: #e2e8f0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    color: var(--fg);
+    background: var(--bg);
+    line-height: 1.6;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 32px 20px 80px; }
+  header.page {
+    border-bottom: 2px solid var(--border);
+    padding-bottom: 16px;
+    margin-bottom: 24px;
+  }
+  header.page h1 { margin: 0 0 4px; font-size: 28px; }
+  header.page p { margin: 0; color: var(--muted); font-size: 14px; }
+  h2 { font-size: 22px; margin: 36px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  h3 { font-size: 17px; margin: 20px 0 8px; color: var(--accent); }
+  p { margin: 8px 0; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 4px 0; }
+  code.inline {
+    background: var(--accent-bg);
+    color: var(--accent);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: "SFMono-Regular", Consolas, monospace;
+  }
+  pre {
+    background: var(--code-bg);
+    color: var(--code-fg);
+    padding: 16px 18px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.6;
+    font-family: "SFMono-Regular", Consolas, monospace;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px 22px;
+    margin: 12px 0;
+  }
+  .card h3 { margin-top: 0; }
+  .tag {
+    display: inline-block;
+    padding: 2px 8px;
+    background: var(--accent-bg);
+    color: var(--accent);
+    border-radius: 999px;
+    font-size: 12px;
+    margin-right: 6px;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+  th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+  th { background: #f3f4f6; font-weight: 600; }
+  .muted { color: var(--muted); }
+  /* ---------- 分层架构图 ---------- */
+  .arch-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    background: #f7f7fa;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+    margin: 12px 0;
+  }
+  .arch-layer {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 16px;
+    align-items: center;
+    background: #fff;
+    border: 1px solid var(--border);
+    border-left: 6px solid var(--accent);
+    border-radius: 10px;
+    padding: 14px 18px;
+  }
+  .arch-layer .l-title {
+    font-weight: 700;
+    color: var(--accent);
+    font-size: 15px;
+    line-height: 1.2;
+  }
+  .arch-layer .l-title small {
+    display: block;
+    font-size: 11px;
+    color: var(--muted);
+    font-weight: 400;
+    margin-top: 3px;
+  }
+  .arch-layer .l-body {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .layer-tag {
+    background: #eef2ff;
+    color: #1e3a8a;
+    padding: 5px 12px;
+    border-radius: 999px;
+    font-size: 13px;
+  }
+  .arrow-down {
+    text-align: center;
+    font-size: 22px;
+    color: var(--accent);
+    line-height: 1;
+    font-weight: 700;
+  }
+
+  /* ---------- 数据流图 ---------- */
+  .data-flow {
+    display: grid;
+    grid-template-columns: repeat(9, 1fr);
+    gap: 6px;
+    align-items: stretch;
+    margin: 16px 0;
+  }
+  .data-box {
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 8px;
+    text-align: center;
+    font-size: 12px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 90px;
+  }
+  .data-box b {
+    display: block;
+    color: var(--accent);
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+  .data-box small { color: var(--muted); line-height: 1.4; }
+  .data-arrow {
+    color: var(--accent);
+    font-size: 22px;
+    align-self: center;
+    text-align: center;
+    font-weight: 700;
+  }
+
+  /* ---------- 文件树 ---------- */
+  .tree {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.9;
+    background: #f7f7fa;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 22px;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .tree .dir { color: var(--accent); font-weight: 600; }
+  .tree .file { color: var(--fg); }
+  .tree .note { color: var(--muted); font-size: 12px; margin-left: 8px; }
+
+  /* ---------- 调用链图 ---------- */
+  .call-chain {
+    background: #f7f7fa;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin: 14px 0;
+  }
+  .call-step {
+    display: grid;
+    grid-template-columns: 40px 1fr;
+    gap: 14px;
+    align-items: start;
+    padding: 10px 4px;
+    border-top: 1px dashed #d8d8e0;
+  }
+  .call-step:first-child { border-top: 0; }
+  .call-step .step-num {
+    background: var(--accent);
+    color: #fff;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .call-step .step-body h4 {
+    margin: 0 0 4px;
+    font-size: 15px;
+  }
+  .call-step .step-body p {
+    margin: 0;
+    color: #4b5563;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .call-step .step-body code {
+    background: #eef2ff;
+    color: #1e3a8a;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+  /* ---------- tutorial 页面: 侧边栏布局 ---------- */
+  .tut-body {
+    display: flex;
+    min-height: 100vh;
+  }
+  .tut-sidebar {
+    width: 240px;
+    flex-shrink: 0;
+    background: #1e293b;
+    color: #94a3b8;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+  .tut-sidebar-logo {
+    padding: 20px 20px 12px;
+    border-bottom: 1px solid #334155;
+    font-size: 15px;
+    font-weight: 700;
+    color: #f1f5f9;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .tut-sidebar-logo .emoji { font-size: 20px; }
+  .tut-sidebar nav {
+    padding: 12px 0;
+    flex: 1;
+  }
+  .tut-sidebar nav .section-label {
+    padding: 8px 20px 4px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #475569;
+  }
+  .tut-sidebar nav a {
+    display: block;
+    padding: 7px 20px;
+    color: #94a3b8;
+    text-decoration: none;
+    font-size: 13.5px;
+    border-left: 3px solid transparent;
+    transition: color .15s, background .15s, border-color .15s;
+  }
+  .tut-sidebar nav a:hover {
+    color: #f1f5f9;
+    background: #334155;
+    border-left-color: #64748b;
+  }
+  .tut-sidebar nav a.active {
+    color: #93c5fd;
+    background: #1e3a5f;
+    border-left-color: #3b82f6;
+  }
+  .tut-sidebar-footer {
+    padding: 12px 20px;
+    border-top: 1px solid #334155;
+    font-size: 11px;
+    color: #475569;
+  }
+  .tut-main {
+    flex: 1;
+    min-width: 0;
+    padding: 40px 48px 80px;
+    max-width: 860px;
+  }
+  .tut-main .banner {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: #fff;
+    padding: 28px 32px;
+    border-radius: 14px;
+    margin-bottom: 32px;
+  }
+  .tut-main .banner h1 { margin: 0 0 6px; color: #fff; font-size: 26px; }
+  .tut-main .banner p { margin: 0; opacity: .9; }
+  .tut-main h2 {
+    font-size: 22px;
+    margin: 40px 0 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    color: var(--fg);
+  }
+  .tut-main h3 { font-size: 17px; margin: 22px 0 8px; color: var(--accent); }
+  .tut-main p { margin: 8px 0; }
+  .tut-main ul, .tut-main ol { padding-left: 22px; }
+  .tut-main li { margin: 4px 0; }
+  .tut-main .muted { color: var(--muted); }
+
+  /* 里程碑列表 */
+  .milestone-row {
+    display: grid;
+    grid-template-columns: 60px 1fr auto;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 14px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin: 6px 0;
+  }
+  .milestone-row .ms-num { font-weight: 700; font-size: 18px; color: var(--accent); }
+  .status-badge { padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .status-done { background: #dcfce7; color: #166534; }
+  .status-pending { background: #fef3c7; color: #92400e; }
+</style>
+</head>
+<body>
+<div class="tut-body">
+
+  <!-- 左侧固定导航栏 -->
+  <aside class="tut-sidebar">
+    <div class="tut-sidebar-logo">
+      <span class="emoji">🧠</span>
+      agent-lab
+    </div>
+    <nav>
+      <div class="section-label">目录</div>
+      <a href="#what">1. 这是什么</a>
+      <a href="#arch">2. 分层架构</a>
+      <a href="#arch-flow">2.1 数据流</a>
+      <a href="#arch-chain">2.2 调用链</a>
+      <a href="#arch-files">2.3 文件结构</a>
+      <a href="#milestones">3. 里程碑</a>
+      <a href="#m0">4. M0 · 最小骨架</a>
+      <a href="#m1">5. M1 · 多轮对话</a>
+      <a href="#local">6. 本地大模型</a>
+      <a href="#next">7. 接下来</a>
+      <div class="section-label" style="margin-top:8px">外部</div>
+      <a href="/chat">← Chat</a>
+      <a href="/settings">Settings</a>
+    </nav>
+    <div class="tut-sidebar-footer">
+      M0 ✅ · M1 ✅<br/>profile: L
+    </div>
+  </aside>
+
+  <!-- 右侧主内容 -->
+  <main class="tut-main">
+    <div class="banner">
+      <h1>🧠 agent-lab 设计教程</h1>
+      <p>从零手写一个 Agent 的学习路径 · 纯 Go · 本地大模型</p>
+    </div>
+
+<h2 id="what">1. 这是什么 / 为什么要做</h2>
+<div class="card">
+  <p><span class="tag">纯 Go</span><span class="tag">本地模型</span><span class="tag">教学导向</span></p>
+  <p>市面上的 Agent 框架太多 (LangChain / LlamaIndex / AutoGen...), 每一个都有一堆概念要学. 本项目反其道而行 — <b>自己手写一个</b>.</p>
+  <p>目标不是替代框架, 而是:</p>
+  <ul>
+    <li>看见每一根线: 从 HTTP 调用到 SSE 流式, 一行一行自己写.</li>
+    <li>用统一业务场景 (台湾电商文案) 贯穿所有里程碑, 不切换上下文.</li>
+    <li>不依赖云端 API — 没有 GPU 也能用 fake server 跑通流程.</li>
+  </ul>
+</div>
+
+<h2 id="arch">2. 分层架构</h2>
+<p>Agent 拆成 <b>4 个水平层</b>：入口 → 应用 → 领域 → 基础设施。上层调用下层提供的能力，不反向依赖。下面每一层的职责和对应的 Go 文件：</p>
+
+<div class="arch-stack">
+  <div class="arch-layer">
+    <div class="l-title">入口 Entry<small>用户看得见的入口：命令行 / 浏览器</small></div>
+    <div class="l-body">
+      <span class="layer-tag">cmd/chat (REPL)</span>
+      <span class="layer-tag">cmd/web (HTTP)</span>
+    </div>
+  </div>
+  <div class="arrow-down">▼ 调用</div>
+  <div class="arch-layer">
+    <div class="l-title">应用 App<small>把请求串成业务动作</small></div>
+    <div class="l-body">
+      <span class="layer-tag">internal/web · Chat handlers</span>
+      <span class="layer-tag">internal/web · SSE 流式</span>
+      <span class="layer-tag">internal/web · ConversationStore</span>
+    </div>
+  </div>
+  <div class="arrow-down">▼ 调用</div>
+  <div class="arch-layer">
+    <div class="l-title">领域 Domain<small>记忆 + 角色卡，核心逻辑</small></div>
+    <div class="l-body">
+      <span class="layer-tag">internal/memory (会话记忆)</span>
+      <span class="layer-tag">internal/prompt (角色卡 + 模板)</span>
+      <span class="layer-tag">internal/tools (M2+ 工具调用)</span>
+    </div>
+  </div>
+  <div class="arrow-down">▼ 调用</div>
+  <div class="arch-layer">
+    <div class="l-title">基础设施 Infra<small>协议和配置，不关心业务</small></div>
+    <div class="l-body">
+      <span class="layer-tag">internal/llm (OpenAI 兼容协议)</span>
+      <span class="layer-tag">internal/config (配置 + profile)</span>
+      <span class="layer-tag">scripts/fake-openai (无模型替身)</span>
+    </div>
+  </div>
+</div>
+
+<p class="muted" style="font-size: 13px">说明：分层架构的意义是让"业务会不会写文案"和"网络怎么连接模型"两个问题解耦。将来要换模型、换浏览器 UI 时，只改最底层或最上层，不需要动中间的领域层。</p>
+
+<h3 id="arch-flow">2.1 一条用户消息的数据流</h3>
+<p>用户在浏览器里输入一句话，点击"发送"后，这条消息会依次经过以下 5 个"处理节点"，最终以字符流的形式回到浏览器。每个节点对应一段可单独打开看的源码文件。</p>
+<div class="data-flow">
+  <div class="data-box"><b>① 浏览器</b><small>HTML + JS<br/>chat.js 发 fetch</small></div>
+  <div class="data-arrow">→</div>
+  <div class="data-box"><b>② chat API handler</b><small>internal/web/handlers_chat.go<br/>POST /api/chat</small></div>
+  <div class="data-arrow">→</div>
+  <div class="data-box"><b>③ 会话记忆</b><small>internal/memory/shortterm.go<br/>Append + EnsureBudget</small></div>
+  <div class="data-arrow">→</div>
+  <div class="data-box"><b>④ LLM 协议</b><small>internal/llm/client.go<br/>ChatStream (OpenAI 兼容)</small></div>
+  <div class="data-arrow">→</div>
+  <div class="data-box"><b>⑤ 真正的模型</b><small>llama.cpp / Ollama / fake-openai<br/>POST /v1/chat/completions</small></div>
+</div>
+<p class="muted" style="font-size: 13px">回复的路径是反向的：⑤ 把 <code>data: {"content":"..."}\n\n</code> 的 SSE 帧流式吐给 ④ → ④ 写回给 ② 的 http.Flusher → ② 原样转发给浏览器 → 浏览器 chat.js 拼接并显示。</p>
+
+<h3 id="arch-chain">2.2 一次完整调用链（6 步）</h3>
+<div class="call-chain">
+  <div class="call-step">
+    <div class="step-num">1</div>
+    <div class="step-body">
+      <h4>用户输入 → HTTP POST /api/chat</h4>
+      <p>浏览器发起 JSON 请求：<code>{"conversation_id":"...","message":"写文案..."}</code>。如果是首次发送，<code>conversation_id</code> 为空，服务端会新建一个。</p>
+    </div>
+  </div>
+  <div class="call-step">
+    <div class="step-num">2</div>
+    <div class="step-body">
+      <h4>handlers_chat.go · handleChatAPI()</h4>
+      <p>定位到 <code>ConversationStore</code>，把用户消息写入该会话的 <code>ShortTerm</code>（即 memory 里的消息历史）。如果上下文已超出 token 预算，这里会触发滑窗 / 摘要。</p>
+    </div>
+  </div>
+  <div class="call-step">
+    <div class="step-num">3</div>
+    <div class="step-body">
+      <h4>memory.Snapshot() → 构造 messages 数组</h4>
+      <p>把 <code>[system, user, assistant, user, assistant, ...]</code> 拼成 OpenAI 协议要求的 JSON 数组。system 来自角色卡，每轮 user/assistant 来自历史消息。</p>
+    </div>
+  </div>
+  <div class="call-step">
+    <div class="step-num">4</div>
+    <div class="step-body">
+      <h4>llm.OpenAIClient.ChatStream()</h4>
+      <p>向 <code>OPENAI_BASE_URL</code> 发起 <code>POST /v1/chat/completions</code>，请求里带 <code>stream=true</code>，模型会以 <code>text/event-stream</code> 形式一块一块返回。</p>
+    </div>
+  </div>
+  <div class="call-step">
+    <div class="step-num">5</div>
+    <div class="step-body">
+      <h4>handlers_chat.go · writeSSE()</h4>
+      <p>收到的每一段 content delta，立刻转成浏览器认识的 SSE 帧：<code>event: delta\ndata: {"content":"..."}\n\n</code>，并调用 <code>http.Flusher.Flush()</code> 立刻写回 TCP 连接。这一步让字一个一个出现。</p>
+    </div>
+  </div>
+  <div class="call-step">
+    <div class="step-num">6</div>
+    <div class="step-body">
+      <h4>chat.js onmessage → 拼接并渲染</h4>
+      <p>浏览器端监听 <code>event: delta</code>，把每次 content 追加到一个字符串，再塞进气泡 div 的 innerText。流式结束时收到 <code>event: done</code>，聊天条标记完成。</p>
+    </div>
+  </div>
+</div>
+
+<h3 id="arch-files">2.3 对应到实际文件</h3>
+<div class="tree"><span class="dir">agent-lab/</span>
+├── <span class="dir">cmd/</span>
+│   ├── <span class="file">chat/</span>       <span class="note">CLI REPL 入口 (main.go)</span>
+│   └── <span class="file">web/</span>         <span class="note">HTTP 服务入口 (main.go)</span>
+├── <span class="dir">internal/</span>
+│   ├── <span class="dir">config/</span>      <span class="note">// 配置: env + profile</span>
+│   ├── <span class="dir">llm/</span>         <span class="note">// Chat + SSE 协议</span>
+│   ├── <span class="dir">memory/</span>      <span class="note">// 短期记忆 + 预算 + 摘要</span>
+│   ├── <span class="dir">prompt/</span>      <span class="note">// 角色卡 + 模板</span>
+│   └── <span class="dir">web/</span>         <span class="note">// handlers + 会话 + static HTML/JS</span>
+└── <span class="dir">scripts/</span>
+    └── <span class="file">fake-openai/</span> <span class="note">// 无模型时的协议兼容替身</span></div>
+
+<table>
+  <tr><th>层</th><th>职责</th><th>Go 包</th></tr>
+  <tr><td>入口 (Entry)</td><td>命令行参数 / 信号 / HTTP 监听</td><td>cmd/chat, cmd/web</td></tr>
+  <tr><td>应用 (App)</td><td>会话路由, 工具调用编排, 状态机</td><td>internal/web (后续拆)</td></tr>
+  <tr><td>领域 (Domain)</td><td>记忆管理, prompt 模板, 工具定义</td><td>memory, prompt, tools</td></tr>
+  <tr><td>基础设施 (Infra)</td><td>LLM 协议, 配置加载, 文件系统</td><td>llm, config</td></tr>
+</table>
+
+<h2 id="milestones">3. 11 个里程碑</h2>
+<p>每个里程碑都是一个<b>可以独立运行的小系统</b>. 完成一个就相当于学会一个概念.</p>
+<div class="milestone-row"><div class="ms-num">M0</div><div>最小骨架 · 单轮对话 + CLI + Web UI</div><span class="status-badge status-done">已完成</span></div>
+<div class="milestone-row"><div class="ms-num">M1</div><div>多轮对话 · persona + short-term memory + 滑窗摘要</div><span class="status-badge status-done">已完成</span></div>
+<div class="milestone-row"><div class="ms-num">M2</div><div>原生 Tool Calling · 查库存 / 查价</div><span class="status-badge status-pending">待开始</span></div>
+<div class="milestone-row"><div class="ms-num">M3</div><div>自写 ReAct · 手写"思考-工具-观察"协议</div><span class="status-badge status-pending">待开始</span></div>
+<div class="milestone-row"><div class="ms-num">M4</div><div>长期记忆 · SQLite + 向量索引</div><span class="status-badge status-pending">待开始</span></div>
+<div class="milestone-row"><div class="ms-num">M5</div><div>RAG · 商品资料喂给 Agent</div><span class="status-badge status-pending">待开始</span></div>
+<div class="milestone-row"><div class="ms-num">M6</div><div>Planner · 把用户需求拆成执行计划</div><span class="status-badge status-pending">待开始</span></div>
+<div class="milestone-row"><div class="ms-num">M7</div><div>Multi-Agent · Researcher / Writer / Critic</div><span class="status-badge status-pending">待开始</span></div>
+<div class="milestone-row"><div class="ms-num">M8</div><div>Human-in-the-Loop · 需人工审批的节点</div><span class="status-badge status-pending">待开始</span></div>
+<div class="milestone-row"><div class="ms-num">M9</div><div>可观测与评测 · Trace + 基准问答</div><span class="status-badge status-pending">待开始</span></div>
+<div class="milestone-row"><div class="ms-num">M10</div><div>模型路由 · 小模型路由简单问题, 大模型处理复杂任务</div><span class="status-badge status-pending">待开始</span></div>
+<div class="milestone-row"><div class="ms-num">M11</div><div>综合 · 完整电商文案生成流水线</div><span class="status-badge status-pending">待开始</span></div>
+
+<h2 id="m0">4. M0 · 最小骨架</h2>
+<p>M0 要做的事非常简单: 发一条消息给 LLM, 流式收到回复. 关键是把 <b>可运行的骨架</b> 搭好.</p>
+<h3>核心数据结构</h3>
+<pre>
+// llm/client.go — 与 OpenAI 兼容 server 通信的最小接口
+type Message struct {
+    Role    Role   `json:"role"`
+    Content string `json:"content,omitempty"`
+}
+type ChatRequest struct {
+    Model    string    `json:"model"`
+    Messages []Message `json:"messages"`
+    Stream   bool      `json:"stream,omitempty"`
+}
+type Client interface {
+    Chat(ctx, req) (ChatResponse, error)
+    ChatStream(ctx, req) (&lt;-chan StreamChunk, error)
+}
+</pre>
+<h3>启动方式 (Fake Server + Web)</h3>
+<pre>
+# 终端 A: 启动 fake LLM server (echo 模式, 不需要真实模型)
+go run ./agent-lab/scripts/fake-openai
+
+# 终端 B: 启动 Web UI
+set OPENAI_BASE_URL=http://127.0.0.1:18080/v1
+set OPENAI_API_KEY=sk-local
+set AGENTLAB_PROFILE=L
+go run ./agent-lab/cmd/web
+# 浏览器打开 http://127.0.0.1:8090
+</pre>
+
+<h2 id="m1">5. M1 · 多轮对话</h2>
+<p>M1 引入两个新模块:</p>
+<div class="card">
+  <h3><code class="inline">internal/memory/shortterm.go</code> — 会话记忆</h3>
+  <p>提供 <code class="inline">ShortTerm</code> 结构, 负责:</p>
+  <ul>
+    <li>存储 <code class="inline">system + [user, assistant, user, assistant, ...]</code> 的消息序列</li>
+    <li>粗略估算 token (中文 1.5 字 ≈ 1 token, 英文 4 字 ≈ 1 token)</li>
+    <li>超出预算时先滑窗丢最旧的, 再不行就调 LLM 把最旧一半摘要成一条</li>
+    <li>支持 <code class="inline">:save / :load</code> 到 JSON 文件</li>
+  </ul>
+</div>
+<div class="card">
+  <h3><code class="inline">internal/prompt/persona.go</code> — 角色卡</h3>
+  <p>一个 persona = 一个 system prompt. 支持从 <code class="inline">.md</code> 文件加载, 方便换风格.</p>
+</div>
+<h3>关键调用流</h3>
+<pre>
+1. 用户输入 → memory.Append(user, 输入)
+2. memory.EnsureBudget(ctx, client, model, maxTokens)  // 检查 & 压缩
+3. msgs := memory.Snapshot()  // [system, ...history]
+4. client.ChatStream(ctx, {Model: model, Messages: msgs})
+5. 收集流式回复 → memory.Append(assistant, 完整回复)
+</pre>
+<h3>Web UI 的改变</h3>
+<ul>
+  <li>左侧新增"会话列表", 新建 / 切换 / 重命名 / 删除</li>
+  <li>顶部角色卡编辑区, 保存后下一条消息生效 (不重写历史)</li>
+  <li>服务端压缩时, UI 在消息流中插入一行灰色提示: "摘要: 压缩 N 轮 → M tokens"</li>
+  <li>底部按钮: <code class="inline">Reset / Export / Import</code></li>
+</ul>
+
+<h2 id="local">6. 本地大模型</h2>
+<p>agent-lab 不绑定任何云端 API。只要它在 <code>OPENAI_BASE_URL</code> 上暴露 Chat Completions 协议，就能接进来. 三种方式:</p>
+<table>
+  <tr><th>方式</th><th>适用硬件</th><th>启动命令</th><th>对应的 BASE_URL</th></tr>
+  <tr>
+    <td>llama.cpp</td>
+    <td>CPU / NVIDIA GPU</td>
+    <td><code>./llama-server -m qwen2.5-7b-instruct-q5_k_m.gguf -c 4096 --port 8080</code></td>
+    <td><code>http://127.0.0.1:8080/v1</code></td>
+  </tr>
+  <tr>
+    <td>Ollama</td>
+    <td>macOS / Linux / Win</td>
+    <td><code>ollama run qwen2.5:7b</code></td>
+    <td><code>http://127.0.0.1:11434/v1</code></td>
+  </tr>
+  <tr>
+    <td>fake-openai (台湾电商文案模拟器)</td>
+    <td>任何机器</td>
+    <td><code>go run ./agent-lab/scripts/fake-openai</code></td>
+    <td><code>http://127.0.0.1:18080/v1</code></td>
+  </tr>
+</table>
+
+<h3>fake-openai 是什么?</h3>
+<p>它不是 LLM — 是一个会解析 <b>system prompt 与历史消息</b>、按风格输出繁体中文电商文案的<b>规则模拟器</b>。好处是:</p>
+<ul>
+  <li>零依赖, 零模型下载, 零 GPU</li>
+  <li>完整兼容 OpenAI Chat Completions 协议 (stream=true / usage 字段)</li>
+  <li>支持 4 种风格: 亲切 / 促销 / 专业 / 年轻 / 送礼</li>
+  <li>会自动识别商品名、品牌、价位、平台等信息槽位</li>
+</ul>
+
+<h3>完整启动脚本 (Windows)</h3>
+<pre># 终端 A — fake-openai (台湾电商文案模拟器)
+go run .\agent-lab\scripts\fake-openai
+
+# 终端 B — Web UI
+set OPENAI_BASE_URL=http://127.0.0.1:18080/v1
+set OPENAI_API_KEY=sk-local
+set AGENTLAB_PROFILE=L
+go run .\agent-lab\cmd\web
+
+# 打开浏览器访问:  http://127.0.0.1:8090/chat
+
+# 也可以走 CLI REPL
+go run .\agent-lab\cmd\chat</pre>
+
+<p>默认 profile (<code>AGENTLAB_PROFILE=L</code>) 对应模型 <code>qwen2.5-7b-instruct</code>, 其他档位:</p>
+<ul>
+  <li><b>S</b>: qwen1.5-1.8b-chat (树莓派也能跑)</li>
+  <li><b>M</b>: qwen2.5-3b-instruct</li>
+  <li><b>L</b>: qwen2.5-7b-instruct (推荐)</li>
+  <li><b>XL</b>: qwen2.5-14b-instruct</li>
+</ul>
+
+<h2 id="next">7. 接下来要学什么</h2>
+<p>M2 到 M3 是理解"智能 Agent"的关键 — 让模型<b>自己决定要不要调用工具</b>. 两条路:</p>
+<div class="card">
+  <h3>M2 · 原生 Tool Calling</h3>
+  <p>大多数现代模型 (Qwen2.5 / GPT 系列 / Claude) 都内置对 <code class="inline">tool_calls</code> 的支持. 给一段 JSON Schema, 模型会在合适的时候输出工具调用.</p>
+</div>
+<div class="card">
+  <h3>M3 · 手写 ReAct</h3>
+  <p>如果你用的模型不支持 tool calling, 就手写"思考 → 行动 → 观察"的文本协议. 这是理解 LLM Agent 工作原理的最好练习.</p>
+</div>
+
+<p class="muted" style="margin-top: 40px; text-align: center;">— 持续更新中. 每完成一个里程碑, 这个页面会被刷新 —</p>
+
+  </main>
+</div><!-- tut-body -->
+</body>
+</html>

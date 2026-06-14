@@ -1,9 +1,8 @@
 // Package web 装配 cmd/web 进程的 HTTP server.
 //
-// 设计原则见 agent-lab/docs/06-ui.md:
+// 设计原则:
 //   - 标准库 net/http + html/template + embed.FS, 不引第三方框架.
 //   - SSE 把 llm.Client.ChatStream 的 chunk 直接转给浏览器.
-//   - 路由表与各里程碑增量见 06-ui.md.
 package web
 
 import (
@@ -14,38 +13,41 @@ import (
 
 	"ai-learn-playground/agent-lab/internal/config"
 	"ai-learn-playground/agent-lab/internal/llm"
+	"ai-learn-playground/agent-lab/internal/prompt"
 )
 
 // Server 是 web 模块的入口对象.
-//
-// 字段在后续里程碑会扩展:
-//   - M1: convStore (会话内存/SQLite)
-//   - M2/M3: registry (工具)
-//   - M4: store (SQLite)
-//   - M8: hitl
-//   - M9: trace
 type Server struct {
-	cfg    config.Config
-	llm    llm.Client
-	pages  map[string]*template.Template
-	static http.FileSystem
+	cfg       config.Config
+	llm       llm.Client
+	pages     map[string]*template.Template
+	static    http.FileSystem
+	convs     *ConversationStore
+	defaultSystem string
+	budget    int
+	reserve   int
 }
 
 // NewServer 装配模板与静态资源, 返回可挂载的 Server.
 func NewServer(cfg config.Config, client llm.Client) (*Server, error) {
 	pages, err := loadTemplates()
 	if err != nil {
-		return nil, fmt.Errorf("load templates: %w", err)
+		return nil, err
 	}
 	sub, err := fs.Sub(staticFS, "static")
 	if err != nil {
-		return nil, fmt.Errorf("static sub fs: %w", err)
+		return nil, err
 	}
+	p := prompt.Default()
 	return &Server{
-		cfg:    cfg,
-		llm:    client,
-		pages:  pages,
-		static: http.FS(sub),
+		cfg:           cfg,
+		llm:           client,
+		pages:         pages,
+		static:        http.FS(sub),
+		convs:         NewConversationStore(),
+		defaultSystem: p.SystemPrompt,
+		budget:        2048,
+		reserve:       512,
 	}, nil
 }
 
@@ -59,7 +61,7 @@ func (s *Server) Routes() http.Handler {
 	// 健康检查.
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		_, _ = w.Write([]byte(`{"ok":true,"milestone":"M1"}`))
 	})
 
 	// 入口重定向.
@@ -74,6 +76,10 @@ func (s *Server) Routes() http.Handler {
 	// Chat 面板与 API.
 	mux.HandleFunc("/chat", s.handleChatPage)
 	mux.HandleFunc("/api/chat", s.handleChatAPI)
+	mux.HandleFunc("/api/conversations", s.handleConversationsAPI)
+
+	// 教程页.
+	mux.HandleFunc("/tutorial", s.handleTutorial)
 
 	// 占位面板 (各里程碑陆续替换).
 	for _, p := range placeholders() {
@@ -86,20 +92,17 @@ func (s *Server) Routes() http.Handler {
 	return logging(mux)
 }
 
-// loadTemplates 为每个 page 单独构造一棵 template tree (layout + page).
-//
-// html/template 的 {{define "content"}} 在同一棵 tree 里只能存活一份;
-// 我们故意每个 page 都用同名块, 因此必须按 page 隔离 tree.
+// loadTemplates 为每个 page 单独构造一棵 template tree.
 func loadTemplates() (map[string]*template.Template, error) {
 	funcs := template.FuncMap{"navItems": navItems}
-
 	pages := []string{"chat.html", "placeholder.html", "settings.html"}
 	out := make(map[string]*template.Template, len(pages))
+	var err error
 	for _, p := range pages {
 		t := template.New(p).Funcs(funcs)
-		t, err := t.ParseFS(templatesFS, "templates/layout.html", "templates/"+p)
+		t, err = t.ParseFS(templatesFS, "templates/layout.html", "templates/"+p)
 		if err != nil {
-			return nil, fmt.Errorf("parse %s: %w", p, err)
+			return nil, err
 		}
 		out[p] = t
 	}
@@ -115,11 +118,11 @@ func (s *Server) renderPage(w http.ResponseWriter, page string, data any) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := t.ExecuteTemplate(w, "layout", data); err != nil {
-		fmt.Printf("[web] template %s error: %v\n", page, err)
+		http.Error(w, "template error: "+err.Error(), http.StatusInternalServerError)
 	}
 }
 
-// logging 是最简日志中间件, 后续 M9 会被 trace 替代.
+// logging 是最简日志中间件.
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
@@ -130,7 +133,6 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.ResponseWriter.WriteHeader(code)
 }
 
-// Flush 透传给底层 ResponseWriter, 让 SSE handler 看到 Flusher.
 func (r *statusRecorder) Flush() {
 	if f, ok := r.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
@@ -141,7 +143,6 @@ func logging(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rec := &statusRecorder{ResponseWriter: w, status: 200}
 		h.ServeHTTP(rec, r)
-		// 标准 log 包足够; 控制台一行一条.
 		fmt.Printf("[web] %s %s -> %d\n", r.Method, r.URL.Path, rec.status)
 	})
 }

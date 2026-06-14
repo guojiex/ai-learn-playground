@@ -2,32 +2,49 @@
   <header class="topbar">
     <div class="topbar-title">
       <h1>Chat</h1>
-      <span class="muted">M0 · 单会话, 仅活在浏览器内存. 多会话见 M1.</span>
+      <span class="muted">M1 · 多轮对话, 会话列表, 角色卡可编辑</span>
     </div>
     <div class="topbar-meta">
       <span class="chip">profile <strong>{{.Profile}}</strong></span>
       <span class="chip">model <strong>{{.Model}}</strong></span>
-      <span class="chip">backend <strong>{{.BaseURL}}</strong></span>
+      <span class="chip">budget <strong>{{.Budget}} tokens</strong></span>
     </div>
   </header>
 
-  <details class="persona">
-    <summary>角色卡 (system prompt)</summary>
-    <textarea id="system" rows="3">{{.SystemHi}}</textarea>
-    <p class="muted">本里程碑保存即生效, 不重写已发出的消息. 多会话与持久化在 M1 落地.</p>
-  </details>
+  <div class="chat-layout">
+    <aside class="conv-panel">
+      <div class="conv-head">
+        <button id="new-conv" type="button">+ 新会话</button>
+      </div>
+      <ul id="conv-list" class="conv-list"></ul>
+    </aside>
 
-  <section id="messages" class="messages" aria-live="polite"></section>
+    <section class="chat-main">
+      <details class="persona" {{if .System}}open{{end}}>
+        <summary>角色卡 (system prompt) — 保存后下条消息生效</summary>
+        <textarea id="system" rows="3">{{.System}}</textarea>
+        <div class="persona-actions">
+          <button id="save-system" type="button">保存</button>
+          <span id="system-status" class="muted"></span>
+        </div>
+      </details>
 
-  <footer class="composer">
-    <textarea id="input" rows="2" placeholder="说点什么. Enter 发送, Shift+Enter 换行."></textarea>
-    <div class="composer-actions">
-      <button id="send" type="button">发送</button>
-      <button id="stop" type="button" disabled>停止</button>
-      <button id="reset" type="button" class="ghost">清空</button>
-      <span id="status" class="muted"></span>
-    </div>
-  </footer>
+      <section id="messages" class="messages" aria-live="polite"></section>
+
+      <footer class="composer">
+        <textarea id="input" rows="2" placeholder="说点什么. Enter 发送, Shift+Enter 换行"></textarea>
+        <div class="composer-actions">
+          <button id="send" type="button">发送</button>
+          <button id="stop" type="button" disabled>停止</button>
+          <button id="reset" type="button" class="ghost">重置</button>
+          <button id="export" type="button" class="ghost">导出</button>
+          <button id="import-btn" type="button" class="ghost">导入</button>
+          <input id="import-file" type="file" accept="application/json" hidden />
+          <span id="status" class="muted"></span>
+        </div>
+      </footer>
+    </section>
+  </div>
 
   <script src="/static/chat.js" defer></script>
 {{end}}

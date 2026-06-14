@@ -119,6 +119,66 @@ body { font-family: var(--sans); color: var(--fg); background: var(--bg); }
 .chip strong { font-weight: 600; }
 .muted { color: var(--muted); font-size: 12px; }
 
+/* chat layout (M1): 左侧会话列表 + 右侧主聊天区 */
+.chat-layout {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  flex: 1;
+  min-height: 0;
+}
+.conv-panel {
+  border-right: 1px solid var(--line);
+  background: var(--bg-elev);
+  display: flex; flex-direction: column;
+}
+.conv-head {
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+}
+#new-conv {
+  width: 100%;
+  padding: 8px 12px;
+}
+.conv-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px 4px;
+  flex: 1;
+  overflow: auto;
+}
+.conv-empty {
+  padding: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+}
+.conv-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--fg);
+}
+.conv-item:hover { background: var(--accent-soft); }
+.conv-item.active { background: var(--accent-soft); color: var(--accent); }
+.conv-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-actions { opacity: 0.5; display: flex; gap: 4px; margin-left: 4px; }
+.conv-item:hover .conv-actions { opacity: 1; }
+.conv-actions button {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  padding: 2px 6px;
+  font-size: 11px;
+}
+.conv-actions button:hover { color: var(--fg); }
+
+.chat-main {
+  display: flex; flex-direction: column;
+  min-width: 0;
+}
+
 /* persona */
 .persona {
   margin: 14px 20px 0;
@@ -144,6 +204,7 @@ body { font-family: var(--sans); color: var(--fg); background: var(--bg); }
   background: var(--bg);
   color: var(--fg);
 }
+.persona-actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 
 /* messages */
 .messages {

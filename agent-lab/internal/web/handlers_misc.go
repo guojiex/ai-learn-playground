@@ -1,8 +1,6 @@
 package web
 
-import (
-	"net/http"
-)
+import "net/http"
 
 type placeholderData struct {
 	Title     string

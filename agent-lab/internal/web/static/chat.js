@@ -1,17 +1,227 @@
-// 单文件 SSE Chat 客户端. 故意手写, 不引任何运行时.
+// agent-lab M1 Chat UI: 多会话 + 角色卡 + 摘要提示
 (() => {
   const $messages = document.getElementById("messages");
   const $input    = document.getElementById("input");
   const $send     = document.getElementById("send");
   const $stop     = document.getElementById("stop");
   const $reset    = document.getElementById("reset");
+  const $export   = document.getElementById("export");
+  const $importBtn= document.getElementById("import-btn");
+  const $importFile = document.getElementById("import-file");
   const $system   = document.getElementById("system");
+  const $saveSystem = document.getElementById("save-system");
+  const $systemStatus = document.getElementById("system-status");
   const $status   = document.getElementById("status");
+  const $newConv  = document.getElementById("new-conv");
+  const $convList = document.getElementById("conv-list");
 
-  /** @type {{role:string, content:string}[]} */
-  const history = [];
+  // 当前会话 ID, 初次为 "" (将在首次发送时由服务端生成).
+  let currentConv = "";
+  let currentTitle = "";
   let abortCtrl = null;
+  let busy = false;
 
+  // ----------------- 会话列表 -----------------
+  async function loadConversations() {
+    try {
+      const r = await fetch("/api/conversations");
+      const data = await r.json();
+      renderConvList(data.conversations || []);
+    } catch (_) { /* ignore */ }
+  }
+
+  function renderConvList(convs) {
+    $convList.innerHTML = "";
+    if (convs.length === 0) {
+      const li = document.createElement("li");
+      li.className = "conv-empty";
+      li.textContent = "还没有会话";
+      $convList.appendChild(li);
+      return;
+    }
+    for (const c of convs) {
+      const li = document.createElement("li");
+      li.className = "conv-item" + (c.id === currentConv ? " active" : "");
+      li.dataset.id = c.id;
+      const title = document.createElement("span");
+      title.className = "conv-title";
+      title.textContent = c.title || "(无标题)";
+      title.title = "点击切换会话";
+      title.addEventListener("click", () => switchConversation(c.id));
+      const actions = document.createElement("span");
+      actions.className = "conv-actions";
+      const renameBtn = document.createElement("button");
+      renameBtn.type = "button";
+      renameBtn.textContent = "✎";
+      renameBtn.title = "重命名";
+      renameBtn.addEventListener("click", (e) => { e.stopPropagation(); renameConversation(c.id); });
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.textContent = "✕";
+      delBtn.title = "删除";
+      delBtn.addEventListener("click", (e) => { e.stopPropagation(); deleteConversation(c.id); });
+      actions.appendChild(renameBtn);
+      actions.appendChild(delBtn);
+      li.appendChild(title);
+      li.appendChild(actions);
+      $convList.appendChild(li);
+    }
+  }
+
+  async function switchConversation(id) {
+    if (busy) return;
+    const resp = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "switch", conversation_id: id }),
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    currentConv = data.id;
+    currentTitle = data.title || "";
+    if (data.system) $system.value = data.system;
+    $messages.innerHTML = "";
+    if (data.messages) {
+      for (const m of data.messages) {
+        addBubble(m.role, m.content);
+      }
+    }
+    loadConversations();
+  }
+
+  async function renameConversation(id) {
+    const newName = prompt("新标题:", currentTitle || "");
+    if (!newName) return;
+    const resp = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "rename", conversation_id: id, title: newName }),
+    });
+    if (resp.ok) {
+      if (id === currentConv) currentTitle = newName;
+      loadConversations();
+    }
+  }
+
+  async function deleteConversation(id) {
+    if (!confirm("确认删除这个会话?")) return;
+    const resp = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "delete", conversation_id: id }),
+    });
+    if (resp.ok) {
+      if (id === currentConv) {
+        currentConv = "";
+        currentTitle = "";
+        $messages.innerHTML = "";
+      }
+      loadConversations();
+    }
+  }
+
+  $newConv.addEventListener("click", async () => {
+    if (busy) return;
+    const resp = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "new" }),
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    currentConv = data.id;
+    currentTitle = data.title || "";
+    $messages.innerHTML = "";
+    loadConversations();
+    $input.focus();
+  });
+
+  // ----------------- 角色卡 -----------------
+  $saveSystem.addEventListener("click", async () => {
+    if (!currentConv) return;
+    const resp = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "set_system", conversation_id: currentConv, system: $system.value }),
+    });
+    if (resp.ok) {
+      $systemStatus.textContent = "已保存";
+      setTimeout(() => ($systemStatus.textContent = ""), 1500);
+    }
+  });
+
+  // ----------------- 重置 / 导出 / 导入 -----------------
+  $reset.addEventListener("click", async () => {
+    if (!currentConv) return;
+    if (!confirm("清空当前会话?")) return;
+    const resp = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "reset", conversation_id: currentConv }),
+    });
+    if (resp.ok) $messages.innerHTML = "";
+  });
+
+  $export.addEventListener("click", async () => {
+    if (!currentConv) return;
+    const resp = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "export", conversation_id: currentConv }),
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `conversation-${currentConv}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+
+  $importBtn.addEventListener("click", () => $importFile.click());
+  $importFile.addEventListener("change", async (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    try {
+      const text = await f.text();
+      const parsed = JSON.parse(text);
+      // 先确保有一个会话; 没有就新建.
+      if (!currentConv) {
+        const r = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "new" }),
+        });
+        if (!r.ok) throw new Error("create failed");
+        const d = await r.json();
+        currentConv = d.id;
+      }
+      const resp = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "load",
+          conversation_id: currentConv,
+          system: parsed.system || "",
+          messages: parsed.messages || [],
+        }),
+      });
+      if (!resp.ok) throw new Error("import failed");
+      if (parsed.system) $system.value = parsed.system;
+      $messages.innerHTML = "";
+      if (parsed.messages) {
+        for (const m of parsed.messages) addBubble(m.role, m.content);
+      }
+      loadConversations();
+    } catch (err) {
+      alert("导入失败: " + err.message);
+    } finally {
+      $importFile.value = "";
+    }
+  });
+
+  // ----------------- 消息气泡 -----------------
   function addBubble(role, content, opts = {}) {
     const el = document.createElement("div");
     el.className = "msg " + role + (opts.streaming ? " streaming" : "");
@@ -22,22 +232,28 @@
   }
 
   function addNote(text) {
-    addBubble("note", text);
+    const el = document.createElement("div");
+    el.className = "msg note";
+    el.textContent = text;
+    $messages.appendChild(el);
+    $messages.scrollTop = $messages.scrollHeight;
+    return el;
   }
 
-  function setBusy(busy) {
-    $send.disabled  = busy;
-    $input.disabled = busy;
-    $stop.disabled  = !busy;
-    $status.textContent = busy ? "生成中…" : "";
+  function setBusy(v) {
+    busy = v;
+    $send.disabled = v;
+    $input.disabled = v;
+    $stop.disabled = !v;
+    $status.textContent = v ? "生成中..." : "";
   }
 
+  // ----------------- 发送 -----------------
   async function send() {
     const msg = $input.value.trim();
-    if (!msg) return;
+    if (!msg || busy) return;
 
     addBubble("user", msg);
-    history.push({ role: "user", content: msg });
     $input.value = "";
 
     const assistantEl = addBubble("assistant", "", { streaming: true });
@@ -53,9 +269,10 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          action: "send",
+          conversation_id: currentConv,
           system: $system.value,
           message: msg,
-          history: history.slice(0, -1), // 当前 user 还未完成一轮
         }),
         signal: abortCtrl.signal,
       });
@@ -73,13 +290,38 @@
         if (done) break;
         buf += decoder.decode(value, { stream: true });
         let idx;
-        // SSE 帧之间用空行分隔.
         while ((idx = buf.indexOf("\n\n")) >= 0) {
           const frame = buf.slice(0, idx);
           buf = buf.slice(idx + 2);
           const evt = parseFrame(frame);
           if (!evt) continue;
-          handleEvent(evt);
+          if (evt.event === "start" && evt.data && evt.data.conversation_id) {
+            if (!currentConv) {
+              currentConv = evt.data.conversation_id;
+            }
+          }
+          if (evt.event === "summary" && evt.data) {
+            const d = evt.data;
+            const text = `摘要: 压缩 ${d.before_turns} → ${d.after_turns} 轮` + (d.summary ? `: ${d.summary}` : "");
+            addNote(text);
+            continue;
+          }
+          if (evt.event === "delta" && evt.data && evt.data.content) {
+            acc += evt.data.content;
+            assistantEl.textContent = acc;
+            $messages.scrollTop = $messages.scrollHeight;
+          } else if (evt.event === "finish" && evt.data) {
+            finishReason = evt.data.reason || finishReason;
+          } else if (evt.event === "usage" && evt.data) {
+            usage = evt.data;
+          } else if (evt.event === "error" && evt.data) {
+            assistantEl.classList.add("error");
+            assistantEl.textContent = "错误: " + (evt.data.message || "unknown");
+          } else if (evt.event === "canceled") {
+            addNote("已停止");
+          } else if (evt.event === "done" && evt.data && evt.data.conversation_id) {
+            if (evt.data.title) currentTitle = evt.data.title;
+          }
         }
       }
     } catch (err) {
@@ -93,30 +335,11 @@
       assistantEl.classList.remove("streaming");
       setBusy(false);
       abortCtrl = null;
-      if (acc) history.push({ role: "assistant", content: acc });
-      if (finishReason || usage) {
-        const parts = [];
-        if (finishReason) parts.push("finish=" + finishReason);
-        if (usage) parts.push(`tokens=${usage.prompt_tokens}/${usage.completion_tokens}/${usage.total_tokens}`);
-        $status.textContent = parts.join(" · ");
-      }
-    }
-
-    function handleEvent(evt) {
-      if (evt.event === "delta" && evt.data && evt.data.content) {
-        acc += evt.data.content;
-        assistantEl.textContent = acc;
-        $messages.scrollTop = $messages.scrollHeight;
-      } else if (evt.event === "finish" && evt.data) {
-        finishReason = evt.data.reason || finishReason;
-      } else if (evt.event === "usage" && evt.data) {
-        usage = evt.data;
-      } else if (evt.event === "error" && evt.data) {
-        assistantEl.classList.add("error");
-        assistantEl.textContent = "错误: " + (evt.data.message || "unknown");
-      } else if (evt.event === "canceled") {
-        addNote("已停止");
-      }
+      const parts = [];
+      if (finishReason) parts.push("finish=" + finishReason);
+      if (usage) parts.push(`tokens=${usage.prompt_tokens}/${usage.completion_tokens}/${usage.total_tokens}`);
+      $status.textContent = parts.join(" · ");
+      loadConversations();
     }
   }
 
@@ -129,21 +352,19 @@
     }
     if (dataLines.length === 0) return null;
     let data = null;
-    try { data = JSON.parse(dataLines.join("\n")); } catch (_) { /* keep null */ }
+    try { data = JSON.parse(dataLines.join("")); } catch (_) { /* keep null */ }
     return { event, data };
   }
 
   $send.addEventListener("click", send);
   $stop.addEventListener("click", () => { if (abortCtrl) abortCtrl.abort(); });
-  $reset.addEventListener("click", () => {
-    history.length = 0;
-    $messages.innerHTML = "";
-    $status.textContent = "";
-  });
   $input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       send();
     }
   });
+
+  // 初始加载会话列表
+  loadConversations();
 })();

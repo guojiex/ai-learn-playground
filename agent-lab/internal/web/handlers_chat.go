@@ -16,7 +16,9 @@ type chatPageData struct {
 	Profile  string
 	Model    string
 	BaseURL  string
-	SystemHi string
+	System   string
+	Budget   int
+	Reserve  int
 }
 
 func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
@@ -25,25 +27,29 @@ func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := chatPageData{
-		Title:    "Chat · agent-lab",
-		Active:   "/chat",
-		Profile:  s.cfg.Profile,
-		Model:    s.cfg.ModelChat,
-		BaseURL:  s.cfg.BaseURL,
-		SystemHi: defaultSystemPrompt,
+		Title:   "Chat · agent-lab",
+		Active:  "/chat",
+		Profile: s.cfg.Profile,
+		Model:   s.cfg.ModelChat,
+		BaseURL: s.cfg.BaseURL,
+		System:  s.defaultSystem,
+		Budget:  s.budget,
+		Reserve: s.reserve,
 	}
 	s.renderPage(w, "chat.html", data)
 }
 
-const defaultSystemPrompt = "你是一个稳重务实的台湾电商文案助理. 请先收集 SKU 信息再开口写文案."
-
+// chatAPIRequest 是浏览器发来的一条聊天请求.
+// 支持: 新建消息 / 切换会话 / 编辑角色卡 / 重置 / 导出/导入历史.
 type chatAPIRequest struct {
-	System  string  `json:"system"`
-	Message string  `json:"message"`
-	Model   string  `json:"model"`
-	History []chatHistoryEntry `json:"history"`
-	Temp    float32 `json:"temperature"`
-	Max     int     `json:"max_tokens"`
+	Action       string            `json:"action"`        // "send" | "new" | "rename" | "delete" | "switch" | "set_system" | "reset" | "export" | "load"
+	ConvID       string            `json:"conversation_id"`
+	Title        string            `json:"title"`
+	System       string            `json:"system"`
+	Message      string            `json:"message"`
+	Messages     []chatHistoryEntry `json:"messages"`
+	Temp         float32           `json:"temperature"`
+	Max          int               `json:"max_tokens"`
 }
 
 type chatHistoryEntry struct {
@@ -51,7 +57,7 @@ type chatHistoryEntry struct {
 	Content string `json:"content"`
 }
 
-// handleChatAPI 接收 JSON 请求, 用 SSE 把流式 token 转发给浏览器.
+// handleChatAPI 处理聊天相关的所有动作. 当 Action="send" 时用 SSE 流式回复.
 func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -62,11 +68,193 @@ func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	req.Message = strings.TrimSpace(req.Message)
-	if req.Message == "" {
-		http.Error(w, "message is required", http.StatusBadRequest)
+	switch req.Action {
+	case "", "send":
+		s.handleChatSend(w, r, req)
+	case "new":
+		s.handleChatNew(w, req)
+	case "switch":
+		s.handleChatSwitch(w, req)
+	case "rename":
+		s.handleChatRename(w, req)
+	case "delete":
+		s.handleChatDelete(w, req)
+	case "set_system":
+		s.handleChatSetSystem(w, req)
+	case "reset":
+		s.handleChatReset(w, req)
+	case "export":
+		s.handleChatExport(w, req)
+	case "load":
+		s.handleChatLoad(w, req)
+	default:
+		http.Error(w, "unknown action: "+req.Action, http.StatusBadRequest)
+	}
+}
+
+// handleConversationsAPI 返回会话列表 (GET).
+func (s *Server) handleConversationsAPI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	list := s.convs.List()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"conversations": list})
+}
+
+// handleTutorial 渲染教程页 (直接从 static/tutorial.html 读取).
+func (s *Server) handleTutorial(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// tutorial.html 是完整 HTML, 不通过 layout 模板.
+	f, err := staticFS.Open("static/tutorial.html")
+	if err != nil {
+		http.Error(w, "tutorial not found", http.StatusNotFound)
+		return
+	}
+	defer f.Close()
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// 直接拷贝到 ResponseWriter.
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := f.Read(buf)
+		if n > 0 {
+			if _, werr := w.Write(buf[:n]); werr != nil {
+				return
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+func (s *Server) handleChatNew(w http.ResponseWriter, req chatAPIRequest) {
+	c := s.convs.New("", req.Title, s.defaultSystem, s.budget, s.reserve)
+	writeJSON(w, http.StatusOK, map[string]any{"id": c.ID, "title": c.Title})
+}
+
+func (s *Server) handleChatSwitch(w http.ResponseWriter, req chatAPIRequest) {
+	c := s.convs.Get(req.ConvID)
+	if c == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
+		return
+	}
+	msgs := c.Memory.Messages()
+	entries := make([]chatHistoryEntry, 0, len(msgs))
+	for _, m := range msgs {
+		entries = append(entries, chatHistoryEntry{Role: string(m.Role), Content: m.Content})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":       c.ID,
+		"title":    c.Title,
+		"system":   c.Memory.System(),
+		"messages": entries,
+	})
+}
+
+func (s *Server) handleChatRename(w http.ResponseWriter, req chatAPIRequest) {
+	if !s.convs.Rename(req.ConvID, req.Title) {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleChatDelete(w http.ResponseWriter, req chatAPIRequest) {
+	if !s.convs.Delete(req.ConvID) {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleChatSetSystem(w http.ResponseWriter, req chatAPIRequest) {
+	c := s.convs.Get(req.ConvID)
+	if c == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
+		return
+	}
+	c.Memory.SetSystem(req.System)
+	s.convs.Touch(req.ConvID)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleChatReset(w http.ResponseWriter, req chatAPIRequest) {
+	c := s.convs.Get(req.ConvID)
+	if c == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
+		return
+	}
+	c.Memory.Reset()
+	s.convs.Touch(req.ConvID)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) handleChatExport(w http.ResponseWriter, req chatAPIRequest) {
+	c := s.convs.Get(req.ConvID)
+	if c == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
+		return
+	}
+	msgs := c.Memory.Messages()
+	entries := make([]chatHistoryEntry, 0, len(msgs))
+	for _, m := range msgs {
+		entries = append(entries, chatHistoryEntry{Role: string(m.Role), Content: m.Content})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"system":   c.Memory.System(),
+		"messages": entries,
+	})
+}
+
+func (s *Server) handleChatLoad(w http.ResponseWriter, req chatAPIRequest) {
+	c := s.convs.Get(req.ConvID)
+	if c == nil {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
+		return
+	}
+	// 先清空, 再恢复.
+	c.Memory.Reset()
+	if req.System != "" {
+		c.Memory.SetSystem(req.System)
+	}
+	for _, m := range req.Messages {
+		role := llm.Role(strings.ToLower(m.Role))
+		if role != llm.RoleUser && role != llm.RoleAssistant {
+			continue
+		}
+		c.Memory.Append(role, m.Content)
+	}
+	s.convs.Touch(req.ConvID)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": c.Memory.Len()})
+}
+
+// handleChatSend 发送一条消息给 LLM, 用 SSE 流式回复.
+func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request, req chatAPIRequest) {
+	req.Message = strings.TrimSpace(req.Message)
+	if req.Message == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "message is required"})
+		return
+	}
+	// 拿到或创建会话.
+	conv := s.convs.Get(req.ConvID)
+	if conv == nil {
+		conv = s.convs.New(req.ConvID, "", s.defaultSystem, s.budget, s.reserve)
+	}
+
+	conv.Memory.Append(llm.RoleUser, req.Message)
+
+	// 压缩检查
+	info, cerr := conv.Memory.EnsureBudget(r.Context(), s.llm, s.cfg.ModelChat, req.Max)
+	if cerr != nil {
+		fmt.Printf("[chat] memory: %v\n", cerr)
+	}
+	s.convs.Touch(conv.ID)
+
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "stream unsupported", http.StatusInternalServerError)
@@ -78,27 +266,21 @@ func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 	h.Set("Content-Type", "text/event-stream")
 	h.Set("Cache-Control", "no-cache")
 	h.Set("Connection", "keep-alive")
-	h.Set("X-Accel-Buffering", "no") // 防止前置代理缓冲
+	h.Set("X-Accel-Buffering", "no")
+
+	// 如果发生了压缩, 先推一条 summary 事件.
+	if info.DidCompress {
+		writeSSE(w, flusher, "summary", map[string]any{
+			"before_turns": info.BeforeTurns,
+			"after_turns":  info.AfterTurns,
+			"before_chars": info.BeforeChars,
+			"summary":      info.Summary,
+		})
+	}
 
 	// 组装 messages.
-	system := strings.TrimSpace(req.System)
-	if system == "" {
-		system = defaultSystemPrompt
-	}
-	msgs := []llm.Message{{Role: llm.RoleSystem, Content: system}}
-	for _, e := range req.History {
-		role := llm.Role(e.Role)
-		if role != llm.RoleUser && role != llm.RoleAssistant {
-			continue
-		}
-		msgs = append(msgs, llm.Message{Role: role, Content: e.Content})
-	}
-	msgs = append(msgs, llm.Message{Role: llm.RoleUser, Content: req.Message})
+	msgs := conv.Memory.Snapshot()
 
-	model := req.Model
-	if model == "" {
-		model = s.cfg.ModelChat
-	}
 	temp := req.Temp
 	if temp <= 0 {
 		temp = 0.4
@@ -108,20 +290,20 @@ func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 		mt = 512
 	}
 	chatReq := llm.ChatRequest{
-		Model:       model,
+		Model:       s.cfg.ModelChat,
 		Messages:    msgs,
 		Temperature: &temp,
 		MaxTokens:   &mt,
 	}
 
-	// 启动流; ctx 来自 r.Context, 浏览器关闭连接即取消.
 	stream, err := s.llm.ChatStream(r.Context(), chatReq)
 	if err != nil {
 		writeSSE(w, flusher, "error", map[string]any{"message": err.Error()})
 		return
 	}
-	writeSSE(w, flusher, "start", map[string]any{"model": model})
+	writeSSE(w, flusher, "start", map[string]any{"model": s.cfg.ModelChat, "conversation_id": conv.ID})
 
+	var sb strings.Builder
 	for chunk := range stream {
 		if chunk.Err != nil {
 			if errors.Is(chunk.Err, r.Context().Err()) {
@@ -132,6 +314,7 @@ func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if chunk.DeltaContent != "" {
+			sb.WriteString(chunk.DeltaContent)
 			writeSSE(w, flusher, "delta", map[string]any{"content": chunk.DeltaContent})
 		}
 		if chunk.FinishReason != "" {
@@ -145,11 +328,29 @@ func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
-	writeSSE(w, flusher, "done", map[string]any{})
+	// 把回复写入历史.
+	conv.Memory.Append(llm.RoleAssistant, sb.String())
+	// 更新标题 (如果是首条消息).
+	if len(conv.Memory.Messages()) <= 2 {
+		first := firstLine(req.Message)
+		if len(first) > 20 {
+			first = first[:20]
+		}
+		conv.Title = first
+	}
+	s.convs.Touch(conv.ID)
+
+	writeSSE(w, flusher, "done", map[string]any{"conversation_id": conv.ID, "title": conv.Title})
+}
+
+func firstLine(s string) string {
+	if idx := strings.IndexAny(s, "\n\r"); idx >= 0 {
+		return strings.TrimSpace(s[:idx])
+	}
+	return strings.TrimSpace(s)
 }
 
 // writeSSE 把 (event, data) 写成 SSE 帧并 flush.
-// 失败 (例如客户端断开) 时静默忽略, 由调用方下一轮迭代终止.
 func writeSSE(w http.ResponseWriter, flusher http.Flusher, event string, payload any) {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -159,4 +360,10 @@ func writeSSE(w http.ResponseWriter, flusher http.Flusher, event string, payload
 		return
 	}
 	flusher.Flush()
+}
+
+func writeJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(payload)
 }
