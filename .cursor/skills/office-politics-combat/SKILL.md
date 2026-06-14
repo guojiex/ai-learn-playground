@@ -232,7 +232,7 @@ A / B / C 三种可能及概率判断
   ├─ 结合渠道读 channel-playbooks.md 调措辞
   ├─ 从 tactics-offense.md + tactics-defense.md 挑本轮用到的招式
   ├─ 从 hook-patterns.md 选 2~4 个钩子分配到三档方案
-  ├─ 强硬档之后，附一条「关系修复动作」（见下方核心原则第 11 条）
+  ├─ 强硬档之后，附一条「关系修复动作」（见核心原则第 11 条"赢完一仗要做关系修复"）
   ├─ 输出含案例 / 范文 / 公开内容时，按 [desensitization.md](desensitization.md) §5 过 agent 侧自检
   ├─ 如果需要逐步升级 → 读 counter-escalation-ladder.md
   └─ 按「固定输出模板」输出
@@ -284,11 +284,13 @@ A / B / C 三种可能及概率判断
 
 在 skill 内部 / 案例文件中一律用代称，**不写真实姓名 / 公司名**：
 
+> 权威源是 [desensitization.md §2.2](desensitization.md) 的代称表，本节是速查版。
+
 - `Me` —— 用户自己
 - `Boss` —— 用户直属老板
 - `BigBoss` —— 老板的老板
 - `QA_Gatekeeper` —— QA leader（截图里的白手套角色）
-- `QA_Member` —— QA 执行同学
+- `PM_Gatekeeper` —— PM / 产品侧 leader
 - `Peer` —— 平级同事
 - `HR` / `Skip` —— HR 或越级汇报对象
 

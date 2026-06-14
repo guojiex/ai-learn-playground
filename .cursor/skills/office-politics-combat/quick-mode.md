@@ -35,7 +35,7 @@
 - 强硬：<≤ 30 字>
 
 ## 钩子
-<本轮埋的那 1 个钩子是什么类型 / 触发信号是什么>，详见 [hook-patterns.md](hook-patterns.md) 第 X 条
+<本轮埋的那 1 个钩子是什么类型 / 触发信号是什么>，详见 [hook-patterns.md](hook-patterns.md) 对应编号的章节
 
 ## 推荐
 <档位> —— 一句话理由

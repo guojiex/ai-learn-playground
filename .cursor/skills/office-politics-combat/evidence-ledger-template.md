@@ -19,7 +19,7 @@
 ```text
 日期：
 渠道：IM / 群聊 / 会议 / Jira / 文档 / 邮件
-相关人：Boss / QA_Gatekeeper / QA_Member / Peer / Product
+相关人：Boss / QA_Gatekeeper / PM_Gatekeeper / Peer
 项目 / 链接：
 
 事件摘要：
