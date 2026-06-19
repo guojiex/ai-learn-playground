@@ -39,4 +39,14 @@ var migrations = []string{
 		content TEXT NOT NULL,
 		PRIMARY KEY (conv_id, idx)
 	)`,
+	`CREATE TABLE IF NOT EXISTS documents (
+		id          TEXT PRIMARY KEY,
+		source      TEXT NOT NULL,
+		chunk_index INTEGER NOT NULL,
+		text        TEXT NOT NULL,
+		embedding   BLOB NOT NULL,
+		metadata    TEXT NOT NULL DEFAULT '{}',
+		created_at  INTEGER NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source)`,
 }

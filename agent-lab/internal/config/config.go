@@ -29,6 +29,14 @@ type Config struct {
 	// 默认 agent-lab/data/agent.db. 为 ":memory:" 时走纯内存库.
 	DBPath string
 
+	// EmbedBaseURL 指向 embedding 后端 (M5+), 例如 http://127.0.0.1:8081/v1.
+	// 为空时回退到 BaseURL (chat 与 embed 同后端).
+	EmbedBaseURL string
+	// EmbedAPIKey embedding 后端的 key, 为空时回退到 APIKey.
+	EmbedAPIKey string
+	// ModelEmbed 默认 embedding 模型名, 来自 AGENTLAB_MODEL_EMBED.
+	ModelEmbed string
+
 	// HTTP 超时与重试.
 	RequestTimeout time.Duration
 	MaxRetries     int
@@ -42,10 +50,14 @@ func Load() (Config, error) {
 		APIKey:         getenv("OPENAI_API_KEY", "sk-local"),
 		ModelChat:      getenv("AGENTLAB_MODEL_CHAT", ""),
 		DBPath:         getenv("AGENTLAB_DB_PATH", "agent-lab/data/agent.db"),
+		EmbedBaseURL:   getenv("AGENTLAB_EMBED_BASE_URL", ""),
+		EmbedAPIKey:    getenv("AGENTLAB_EMBED_API_KEY", ""),
+		ModelEmbed:     getenv("AGENTLAB_MODEL_EMBED", ""),
 		RequestTimeout: getenvDuration("AGENTLAB_REQUEST_TIMEOUT", 120*time.Second),
 		MaxRetries:     getenvInt("AGENTLAB_MAX_RETRIES", 3),
 	}
 	cfg.applyProfileDefaults()
+	cfg.applyEmbedDefaults()
 	if err := cfg.validate(); err != nil {
 		return Config{}, err
 	}
@@ -68,6 +80,19 @@ func (c *Config) applyProfileDefaults() {
 	}
 }
 
+// applyEmbedDefaults 把 embedding 后端回退到 chat 后端, 并设默认 embedding 模型.
+func (c *Config) applyEmbedDefaults() {
+	if c.EmbedBaseURL == "" {
+		c.EmbedBaseURL = c.BaseURL
+	}
+	if c.EmbedAPIKey == "" {
+		c.EmbedAPIKey = c.APIKey
+	}
+	if c.ModelEmbed == "" {
+		c.ModelEmbed = "bge-small-zh-v1.5"
+	}
+}
+
 func (c Config) validate() error {
 	if c.BaseURL == "" {
 		return errors.New("OPENAI_BASE_URL is required (e.g. http://127.0.0.1:8080/v1)")
@@ -83,8 +108,8 @@ func (c Config) validate() error {
 
 // String 返回可打印的简要摘要 (不含 APIKey).
 func (c Config) String() string {
-	return fmt.Sprintf("profile=%s base_url=%s model=%s timeout=%s retries=%d",
-		c.Profile, c.BaseURL, c.ModelChat, c.RequestTimeout, c.MaxRetries)
+	return fmt.Sprintf("profile=%s base_url=%s model=%s embed_url=%s embed_model=%s timeout=%s retries=%d",
+		c.Profile, c.BaseURL, c.ModelChat, c.EmbedBaseURL, c.ModelEmbed, c.RequestTimeout, c.MaxRetries)
 }
 
 func getenv(key, fallback string) string {

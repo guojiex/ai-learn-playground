@@ -17,6 +17,7 @@ import (
 	"ai-learn-playground/agent-lab/internal/llm"
 	"ai-learn-playground/agent-lab/internal/memory"
 	"ai-learn-playground/agent-lab/internal/prompt"
+	"ai-learn-playground/agent-lab/internal/rag"
 	"ai-learn-playground/agent-lab/internal/store"
 	"ai-learn-playground/agent-lab/internal/tools"
 )
@@ -32,6 +33,7 @@ type Server struct {
 	toolHist      *ToolRecentBuffer
 	store         *store.Store
 	kv            *memory.KV
+	retriever     *rag.Retriever
 	defaultSystem string
 	budget        int
 	reserve       int
@@ -58,6 +60,13 @@ func WithStore(st *store.Store) ServerOption {
 func WithMemory(kv *memory.KV) ServerOption {
 	return func(s *Server) {
 		s.kv = kv
+	}
+}
+
+// WithRetriever 注入 RAG retriever, 启用 /knowledge 面板与 kb_search 工具.
+func WithRetriever(r *rag.Retriever) ServerOption {
+	return func(s *Server) {
+		s.retriever = r
 	}
 }
 
@@ -132,6 +141,9 @@ func (s *Server) enabledNav() map[string]bool {
 	if s.kv != nil {
 		enabled["/memory"] = true
 	}
+	if s.retriever != nil {
+		enabled["/knowledge"] = true
+	}
 	return enabled
 }
 
@@ -175,6 +187,12 @@ func (s *Server) Routes() http.Handler {
 		mux.HandleFunc("/api/memory", s.handleMemoryAPI)
 	}
 
+	// Knowledge 面板 (M5): 仅在注入 Retriever 时启用.
+	if s.retriever != nil {
+		mux.HandleFunc("/knowledge", s.handleKnowledgePage)
+		mux.HandleFunc("/api/knowledge", s.handleKnowledgeAPI)
+	}
+
 	// 教程页.
 	mux.HandleFunc("/tutorial", s.handleTutorial)
 
@@ -186,6 +204,9 @@ func (s *Server) Routes() http.Handler {
 			continue
 		}
 		if p.Path == "/memory" && s.kv != nil {
+			continue
+		}
+		if p.Path == "/knowledge" && s.retriever != nil {
 			continue
 		}
 		mux.HandleFunc(p.Path, func(w http.ResponseWriter, r *http.Request) {
@@ -201,7 +222,7 @@ func loadTemplates(enabled map[string]bool) (map[string]*template.Template, erro
 	funcs := template.FuncMap{
 		"navItems": func(active string) []NavItem { return navItems(active, enabled) },
 	}
-	pages := []string{"chat.html", "placeholder.html", "settings.html", "tools.html", "memory.html"}
+	pages := []string{"chat.html", "placeholder.html", "settings.html", "tools.html", "memory.html", "knowledge.html"}
 	out := make(map[string]*template.Template, len(pages))
 	var err error
 	for _, p := range pages {

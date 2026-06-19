@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"ai-learn-playground/agent-lab/internal/llm"
@@ -281,4 +282,136 @@ func (s *Store) DeleteConversation(ctx context.Context, id string) error {
 		return fmt.Errorf("delete conversation %s: %w", id, err)
 	}
 	return tx.Commit()
+}
+
+// ---------------- 文档向量持久化 (M5 RAG) ----------------
+
+// DocRow 是 documents 表的一行 (不含 embedding BLOB, 用于列表展示).
+type DocRow struct {
+	ID         string `json:"id"`
+	Source     string `json:"source"`
+	ChunkIndex int    `json:"chunk_index"`
+	Text       string `json:"text"`
+	Metadata   string `json:"metadata"`
+	CreatedAt  int64  `json:"created_at"`
+}
+
+// DocWithVec 是带向量的文档, 供 VectorStore 加载到内存.
+type DocWithVec struct {
+	DocRow
+	Embedding []float32 `json:"-"`
+}
+
+// PutDoc 写入一个文档块 (含向量). 用 ON CONFLICT 覆盖.
+func (s *Store) PutDoc(ctx context.Context, id, source string, chunkIndex int, text string, embedding []float32, metadata string) error {
+	embBlob, err := encodeFloat32s(embedding)
+	if err != nil {
+		return fmt.Errorf("encode embedding: %w", err)
+	}
+	now := time.Now().Unix()
+	_, err = s.db.ExecContext(ctx,
+		`INSERT INTO documents(id, source, chunk_index, text, embedding, metadata, created_at)
+		 VALUES(?,?,?,?,?,?,?)
+		 ON CONFLICT(id) DO UPDATE SET
+		   source=excluded.source, chunk_index=excluded.chunk_index,
+		   text=excluded.text, embedding=excluded.embedding,
+		   metadata=excluded.metadata, created_at=excluded.created_at`,
+		id, source, chunkIndex, text, embBlob, metadata, now)
+	if err != nil {
+		return fmt.Errorf("put doc %s: %w", id, err)
+	}
+	return nil
+}
+
+// LoadDocs 加载全部文档块 (含向量), 供 VectorStore 启动时 hydrate.
+func (s *Store) LoadDocs(ctx context.Context) ([]DocWithVec, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, source, chunk_index, text, embedding, metadata, created_at FROM documents ORDER BY source, chunk_index`)
+	if err != nil {
+		return nil, fmt.Errorf("load docs: %w", err)
+	}
+	defer rows.Close()
+	var out []DocWithVec
+	for rows.Next() {
+		var d DocWithVec
+		var embBlob []byte
+		if err := rows.Scan(&d.ID, &d.Source, &d.ChunkIndex, &d.Text, &embBlob, &d.Metadata, &d.CreatedAt); err != nil {
+			return nil, err
+		}
+		emb, err := decodeFloat32s(embBlob)
+		if err != nil {
+			return nil, fmt.Errorf("decode embedding for %s: %w", d.ID, err)
+		}
+		d.Embedding = emb
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// DeleteDocsBySource 删除某个 source 下的全部文档块 (重新 ingest 前清理旧数据).
+func (s *Store) DeleteDocsBySource(ctx context.Context, source string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM documents WHERE source=?`, source)
+	if err != nil {
+		return fmt.Errorf("delete docs source=%s: %w", source, err)
+	}
+	return nil
+}
+
+// CountDocs 返回文档块总数.
+func (s *Store) CountDocs(ctx context.Context) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM documents`).Scan(&n)
+	return n, err
+}
+
+// ListDocSources 返回所有 source 及其块数, 用于 Knowledge 面板.
+func (s *Store) ListDocSources(ctx context.Context) ([]DocSourceInfo, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT source, COUNT(*) as n FROM documents GROUP BY source ORDER BY source`)
+	if err != nil {
+		return nil, fmt.Errorf("list doc sources: %w", err)
+	}
+	defer rows.Close()
+	var out []DocSourceInfo
+	for rows.Next() {
+		var info DocSourceInfo
+		if err := rows.Scan(&info.Source, &info.Chunks); err != nil {
+			return nil, err
+		}
+		out = append(out, info)
+	}
+	return out, rows.Err()
+}
+
+// DocSourceInfo 是 Knowledge 面板用到的 source 汇总.
+type DocSourceInfo struct {
+	Source string `json:"source"`
+	Chunks int    `json:"chunks"`
+}
+
+// --- float32 slice ↔ BLOB 编解码 (小端序, 紧凑, 比 JSON 快 5x+) ---
+
+func encodeFloat32s(v []float32) ([]byte, error) {
+	buf := make([]byte, 4*len(v))
+	for i, f := range v {
+		bits := math.Float32bits(f)
+		buf[4*i] = byte(bits)
+		buf[4*i+1] = byte(bits >> 8)
+		buf[4*i+2] = byte(bits >> 16)
+		buf[4*i+3] = byte(bits >> 24)
+	}
+	return buf, nil
+}
+
+func decodeFloat32s(buf []byte) ([]float32, error) {
+	if len(buf)%4 != 0 {
+		return nil, fmt.Errorf("blob length %d not multiple of 4", len(buf))
+	}
+	n := len(buf) / 4
+	out := make([]float32, n)
+	for i := 0; i < n; i++ {
+		bits := uint32(buf[4*i]) | uint32(buf[4*i+1])<<8 | uint32(buf[4*i+2])<<16 | uint32(buf[4*i+3])<<24
+		out[i] = math.Float32frombits(bits)
+	}
+	return out, nil
 }

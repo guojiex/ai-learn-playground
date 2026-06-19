@@ -3,14 +3,15 @@
 // 用于在没有本地大模型时直观跑通 agent-lab 的多轮对话效果.
 //
 // 行为:
-//   1. 读取 system prompt 提取风格关键词 (亲切/促销/专业/年轻).
-//   2. 从最近 2 轮 user 消息中提取商品相关信息 (品牌/价格/规格).
-//   3. 生成带 emoji 的繁体中文文案或追问信息.
-//   4. 当上下文较长 (>500 chars) 时, 在回复前返回一条 summary 事件.
-//   5. 流式以字符为单位推送, 方便观察 SSE 效果.
+//  1. 读取 system prompt 提取风格关键词 (亲切/促销/专业/年轻).
+//  2. 从最近 2 轮 user 消息中提取商品相关信息 (品牌/价格/规格).
+//  3. 生成带 emoji 的繁体中文文案或追问信息.
+//  4. 当上下文较长 (>500 chars) 时, 在回复前返回一条 summary 事件.
+//  5. 流式以字符为单位推送, 方便观察 SSE 效果.
 //
 // 用法:
-//   go run ./agent-lab/scripts/fake-openai
+//
+//	go run ./agent-lab/scripts/fake-openai
 package main
 
 import (
@@ -37,6 +38,7 @@ type chatReq struct {
 func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/chat/completions", handleChat)
+	mux.HandleFunc("/v1/embeddings", handleEmbed)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		fmt.Fprintf(w, "<h1>fake-openai · 台湾电商文案助理</h1><p>POST /v1/chat/completions 即可使用.</p>")

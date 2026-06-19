@@ -25,6 +25,7 @@ import (
 	"ai-learn-playground/agent-lab/internal/config"
 	"ai-learn-playground/agent-lab/internal/llm"
 	"ai-learn-playground/agent-lab/internal/memory"
+	"ai-learn-playground/agent-lab/internal/rag"
 	"ai-learn-playground/agent-lab/internal/store"
 	"ai-learn-playground/agent-lab/internal/tools"
 	"ai-learn-playground/agent-lab/internal/web"
@@ -76,6 +77,19 @@ func main() {
 		kv = memory.NewKV(st)
 	}
 
+	// M5: RAG 向量库 + retriever. 需要 embedder (可指向同一 fake/真实后端).
+	var retriever *rag.Retriever
+	if st != nil {
+		embedder := llm.NewOpenAIEmbedder(cfg.EmbedBaseURL, cfg.EmbedAPIKey, cfg.ModelEmbed, cfg.RequestTimeout, 0)
+		vs, err := memory.NewVectorStore(st)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[agent-lab] vector store: %v (RAG 不可用)\n", err)
+		} else {
+			retriever = rag.NewRetriever(embedder, vs)
+			fmt.Fprintf(os.Stderr, "[agent-lab] rag: %d chunks (dim=%d)\n", retriever.Count(), retriever.Dim())
+		}
+	}
+
 	reg := tools.NewRegistry()
 	reg.Register(tools.NewProductLookup(dataDir))
 	reg.Register(tools.NewPriceFormat())
@@ -84,6 +98,9 @@ func main() {
 	if kv != nil {
 		reg.Register(tools.NewMemoryGet(kv))
 		reg.Register(tools.NewMemoryPut(kv))
+	}
+	if retriever != nil {
+		reg.Register(tools.NewKBSearch(retriever))
 	}
 	fmt.Fprintf(os.Stderr, "[agent-lab] tools=%v\n", reg.Names())
 
@@ -94,6 +111,9 @@ func main() {
 	}
 	if kv != nil {
 		srvOpts = append(srvOpts, web.WithMemory(kv))
+	}
+	if retriever != nil {
+		srvOpts = append(srvOpts, web.WithRetriever(retriever))
 	}
 
 	srv, err := web.NewServer(cfg, client, srvOpts...)

@@ -36,6 +36,7 @@ var toolExamples = map[string]string{
 	"slang_check":    `{"text":"限時下殺 現貨免運, CP值高的必買神器"}`,
 	"memory_get":     `{"namespace":"seller:A001","key":"tone"}`,
 	"memory_put":     `{"namespace":"seller:A001","key":"tone","value":"{\"style\":\"girlfriend\",\"emoji\":\"high\",\"price_position\":\"end\"}"}`,
+	"kb_search":      `{"query":"蝦皮標題字數限制","k":5}`,
 }
 
 func (s *Server) handleToolsPage(w http.ResponseWriter, r *http.Request) {

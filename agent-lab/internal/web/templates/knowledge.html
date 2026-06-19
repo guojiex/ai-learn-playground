@@ -1,0 +1,27 @@
+{{define "content"}}
+  <header class="topbar">
+    <div class="topbar-title">
+      <h1>Knowledge</h1>
+      <span class="muted">M5 · RAG 知识库检索 (embedding + 向量 top-k)</span>
+    </div>
+    <div class="topbar-meta">
+      <span class="chip">profile <strong>{{.Profile}}</strong></span>
+      <span class="chip">chat <strong>{{.Model}}</strong></span>
+      <span class="chip">embed <strong>{{.Embed}}</strong></span>
+    </div>
+  </header>
+
+  <section class="knowledge-page">
+    <div class="kb-stats" id="kb-stats"></div>
+
+    <div class="kb-search-box">
+      <input id="kb-query" type="text" placeholder="搜索知识库, 例如: 蝦皮標題字數限制" autocomplete="off" />
+      <button id="kb-search-btn" type="button">检索</button>
+      <span id="kb-search-status" class="muted"></span>
+    </div>
+
+    <div id="kb-results" class="kb-results"></div>
+  </section>
+
+  <script src="/static/knowledge.js" defer></script>
+{{end}}

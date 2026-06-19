@@ -28,7 +28,7 @@
         {{end}}
       </nav>
       <div class="sidebar-foot">
-        <span class="muted">M4 · memory</span>
+        <span class="muted">M5 · rag</span>
       </div>
     </aside>
     <main class="main">
@@ -45,6 +45,7 @@
     {{if eq $n "chat"}}<path d="M21 15a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z"/>
     {{else if eq $n "tool"}}<path d="M14.7 6.3a4 4 0 1 1 3 3L7 21H3v-4z"/>
     {{else if eq $n "memory"}}<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>
+    {{else if eq $n "book-open"}}<path d="M2 4h7a2 2 0 0 1 2 2v14a1 1 0 0 0-1-1H2z"/><path d="M22 4h-7a2 2 0 0 0-2 2v14a1 1 0 0 1 1-1h8z"/>
     {{else if eq $n "plan"}}<path d="M3 6h18M3 12h12M3 18h6"/>
     {{else if eq $n "multi"}}<circle cx="9" cy="7" r="3"/><circle cx="17" cy="11" r="3"/><circle cx="7" cy="17" r="3"/><path d="M9 7h8M9 17l8-6"/>
     {{else if eq $n "approve"}}<path d="M20 6 9 17l-5-5"/>

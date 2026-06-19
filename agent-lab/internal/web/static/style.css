@@ -504,3 +504,37 @@ dl.kv dd code { font-family: var(--mono); }
   background: var(--bg);
   color: var(--fg);
 }
+
+/* ---------------- Knowledge 面板 (M5) ---------------- */
+.knowledge-page { display: flex; flex-direction: column; gap: 14px; }
+.kb-stats { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
+.kb-source-list { list-style: none; padding: 0; margin: 6px 0 0; display: flex; flex-direction: column; gap: 4px; width: 100%; }
+.kb-source-list li { font-size: 12px; }
+.kb-source-list code { font-family: var(--mono); color: var(--accent); }
+.kb-search-box { display: flex; gap: 8px; align-items: center; }
+.kb-search-box input[type="text"] {
+  flex: 1; padding: 6px 12px; font-size: 13px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--bg); color: var(--fg);
+}
+.kb-search-box button {
+  padding: 6px 18px; font-size: 13px; cursor: pointer;
+  background: var(--accent); color: white; border: none; border-radius: var(--radius);
+}
+.kb-search-box button:disabled { opacity: 0.5; cursor: wait; }
+.kb-results { display: flex; flex-direction: column; gap: 10px; }
+.kb-result {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 10px 12px; background: var(--bg-elev);
+}
+.kb-result-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.kb-rank { font-weight: 700; color: var(--accent); font-size: 13px; }
+.kb-score { font-size: 11px; color: var(--muted); font-family: var(--mono); }
+.kb-source { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-left: auto; }
+.kb-text {
+  margin: 0; font-size: 12px; line-height: 1.6;
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 300px; overflow: auto;
+  background: var(--bg); padding: 8px 10px; border-radius: 4px;
+  border: 1px solid var(--line);
+}

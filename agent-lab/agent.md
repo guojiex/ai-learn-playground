@@ -5,6 +5,106 @@
 
 ---
 
+## 2026-06-19 — M5 完成 (RAG: embedding + 向量检索 + kb_search 工具)
+
+里程碑: M5 — 实现 RAG (Retrieval-Augmented Generation) 全链路: 文档切块 → embedding → 向量持久化 → cosine top-k 检索 → agent 工具调用 → Web 面板
+
+### 已实现
+
+**Embedding 客户端: internal/llm/embed.go (新)**
+- `Embedder` 接口: `Embed(ctx, texts) → [][]float32` + `Dim() int`.
+- `OpenAIEmbedder`: 调 OpenAI 兼容 `/v1/embeddings`, 自动探测维度, 与 chat client 分开 (可指向不同端口).
+
+**Embedding 配置: internal/config/config.go (改)**
+- 新增 `EmbedBaseURL` / `EmbedAPIKey` / `ModelEmbed` (环境变量 `AGENTLAB_EMBED_BASE_URL` / `AGENTLAB_EMBED_API_KEY` / `AGENTLAB_MODEL_EMBED`).
+- `applyEmbedDefaults`: embed 后端为空时回退到 chat 后端; 默认模型 `bge-small-zh-v1.5`.
+
+**Fake embedding server: scripts/fake-openai/embed.go (新)**
+- `/v1/embeddings` 端点: 字符 bigram FNV 哈希 → 128 维向量 → L2 归一化.
+- 确定性: 相同文本 → 相同向量; 共享 bigram 的文本 → 高余弦相似度, 足以演示 top-k 检索.
+
+**向量持久化: internal/store/ (改)**
+- `migrations.go`: 新增 `documents` 表 (id, source, chunk_index, text, embedding BLOB, metadata, created_at) + source 索引.
+- `sqlite.go`: `PutDoc` / `LoadDocs` / `DeleteDocsBySource` / `CountDocs` / `ListDocSources`; float32 slice ↔ BLOB 编解码 (小端序, 紧凑).
+
+**向量检索层: internal/memory/vector.go (新)**
+- `VectorStore`: SQLite 持久化 + 内存暴力 cosine top-k (ADR-0005 起步策略, 零额外依赖).
+- 启动时从 SQLite hydrate 全部向量到内存; `Add` / `DeleteBySource` write-through.
+- `Search(query, k)`: 遍历全部向量做 cosine, 排序取 top-k.
+- `cosineSim`: 通用余弦相似度 (自动处理未归一化向量).
+
+**RAG 核心组件: internal/rag/ (新包)**
+- `chunker.go`: `Chunk(text, cfg)` 按 rune 计数切分, 支持 overlap, 在句号/换行边界微调切点; `ChunkCount` 估算块数.
+- `retriever.go`: `Retriever.Retrieve(ctx, query, k)` → embed query → VectorStore.Search; `RetrieveAndRender` 便捷组合; `Count/Dim/Sources` 委托.
+- `render.go`: `Render(results)` 格式化成 system prompt 知识上下文块; `RenderToolResponse(query, results)` 生成 agent 可解析的 JSON.
+
+**知识库搜索工具: internal/tools/kb_search.go (新)**
+- `kb_search(query, k)`: agent 调用此工具检索知识库, 返回 top-k 文档块的 JSON.
+- 写文案前 agent 可先 `kb_search(query="蝦皮標題字數限制")` 获取平台规则, 避免违规.
+
+**数据导入工具: cmd/ingest/main.go (新)**
+- `-dir <目录>`: 批量导入 .md/.txt; `-file <文件>`: 导入单文件; `-list`: 查看统计; `-delete <source>`: 删除.
+- 流程: 读取 → `rag.Chunk` 切块 → 批量 `embedder.Embed` → `VectorStore.Add` 落库.
+- 幂等: 同 source 先删旧再写新.
+
+**平台规则文档: data/platform_rules/ (新)**
+- `shopee_tw.md` / `pchome_tw.md` / `momo_tw.md` / `xiaohongshu.md`: 四个平台的标题/违禁词/hashtag/促销规则.
+
+**Web UI 改造: internal/web/**
+- `server.go`: 新增 `WithRetriever` 选项 + `retriever` 字段; `/knowledge` + `/api/knowledge` 路由; `enabledNav` / `loadTemplates` 接入 knowledge.html.
+- `handlers_knowledge.go` (新): `GET /knowledge` 页面; `GET /api/knowledge` 统计 (sources/count/dim); `POST /api/knowledge` 检索 (query + k → top-k 结果 + 渲染上下文).
+- `templates/knowledge.html` + `static/knowledge.js` (新): Knowledge 面板, 统计展示 + 搜索框 + 结果列表 (rank/score/source/text).
+- `nav.go` + `placeholders()`: 新增 Knowledge 导航项与 M5 占位.
+- `templates/layout.html`: 新增 book-open 图标; footer 改 `M5 · rag`.
+- `handlers_tools.go`: 新增 `kb_search` 工具示例.
+- `static/style.css`: 新增 Knowledge 面板样式.
+- `cmd/web/main.go`: 构造 embedder → VectorStore → Retriever → 注册 kb_search → `WithRetriever`.
+
+**测试**
+- `internal/rag/chunker_test.go`: 短文本/空文本/overlap/边界/计数.
+- `internal/rag/retriever_test.go`: top-k 检索准确性/空库/RetrieveAndRender/Render/RenderToolResponse.
+- `internal/memory/vector_test.go`: 增删查/重开持久化/cosineSim 数学正确性.
+- `internal/tools/kb_search_test.go`: 必填校验/返回 JSON 结构.
+- `internal/web/handlers_knowledge_test.go`: 页面渲染/统计 API/搜索 API/未配置时占位.
+
+### 启动方式
+
+```bash
+# 终端 A: fake 后端 (含 chat + embedding)
+go run ./agent-lab/scripts/fake-openai
+
+# 终端 B: 导入平台规则到向量库
+OPENAI_BASE_URL=http://127.0.0.1:18080/v1 OPENAI_API_KEY=sk-local \
+  AGENTLAB_DB_PATH=agent-lab/data/agent.db \
+  go run ./agent-lab/cmd/ingest -dir agent-lab/data/platform_rules
+
+# 终端 C: web
+OPENAI_BASE_URL=http://127.0.0.1:18080/v1 OPENAI_API_KEY=sk-local AGENTLAB_PROFILE=L \
+  go run ./agent-lab/cmd/web
+# 浏览器 http://127.0.0.1:8090
+#   /knowledge  搜索知识库, 查看检索结果与 score
+#   /tools      试调用 kb_search 工具
+#   /chat       agent 可自主调用 kb_search 获取平台规则后写文案
+```
+
+### 验收
+
+- [x] embedding 后端可独立配置 (`AGENTLAB_EMBED_BASE_URL`), 为空时回退到 chat 后端
+- [x] 文档切块 (500 字/块, 50 字 overlap) + 批量 embedding + SQLite 持久化
+- [x] 向量库重启不丢 (hydrate from agent.db), 暴力 cosine top-k 检索准确
+- [x] `kb_search` 工具返回结构化 JSON, agent 可在 ReAct/native 模式下自主调用
+- [x] Knowledge 面板展示统计 + 搜索 + 结果 (rank/score/source/text)
+- [x] 单测覆盖: chunker/retriever/vector store/kb_search/web knowledge
+- [x] `go vet` / `go build` / `go test ./...` 全部通过
+
+### 衔接
+
+下一站候选:
+- M6 (Planner-Executor: DAG 拆解 + 上下文裁剪, 依赖 M4 summarizer + M5 retriever)
+- M9 (Trace: 复用 M5 的 store 做 trace 持久化)
+
+---
+
 ## 2026-06-19 — M4 完成 (记忆: 短期摘要 + 长期 KV + SQLite)
 
 里程碑: M4 — 把 M1 的短期滑窗升级为"滑窗+摘要"双层, 引入跨会话长期记忆 (KV), 用 SQLite 做单文件持久层

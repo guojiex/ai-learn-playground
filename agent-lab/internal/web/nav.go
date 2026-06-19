@@ -17,6 +17,7 @@ func navItems(active string, enabled map[string]bool) []NavItem {
 		{Path: "/chat", Label: "Chat", Icon: "chat"},
 		{Path: "/tools", Label: "Tools", Icon: "tool", Disabled: true},
 		{Path: "/memory", Label: "Memory", Icon: "memory", Disabled: true},
+		{Path: "/knowledge", Label: "Knowledge", Icon: "book-open", Disabled: true},
 		{Path: "/plan", Label: "Plan", Icon: "plan", Disabled: true},
 		{Path: "/multi", Label: "Multi-Agent", Icon: "multi", Disabled: true},
 		{Path: "/approvals", Label: "Approvals", Icon: "approve", Disabled: true},
@@ -48,6 +49,7 @@ func placeholders() []Placeholder {
 	return []Placeholder{
 		{"/tools", "Tools", "M2", "工具列表与最近调用. 在 M2 启用."},
 		{"/memory", "Memory", "M4", "长期记忆 KV 浏览. 在 M4 启用."},
+		{"/knowledge", "Knowledge", "M5", "RAG 知识库检索. 在 M5 启用."},
 		{"/plan", "Plan", "M6", "Plan DAG 与执行进度. 在 M6 启用."},
 		{"/multi", "Multi-Agent", "M7", "Researcher / Writer / Critic 消息流. 在 M7 启用."},
 		{"/approvals", "Approvals", "M8", "HITL 待办与详情. 在 M8 启用."},
