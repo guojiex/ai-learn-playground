@@ -1,0 +1,26 @@
+{{define "content"}}
+  <header class="topbar">
+    <div class="topbar-title">
+      <h1>Plan</h1>
+      <span class="muted">M6 · Planner-Executor (DAG 规划 + 分步执行 + 失败重规划)</span>
+    </div>
+    <div class="topbar-meta">
+      <span class="chip">profile <strong>{{.Profile}}</strong></span>
+      <span class="chip">model <strong>{{.Model}}</strong></span>
+    </div>
+  </header>
+
+  <section class="plan-page">
+    <div class="plan-input-box">
+      <input id="plan-goal" type="text" placeholder="输入目标, 例如: 为 sku_001 在小红书台湾发一篇上新文案" autocomplete="off" />
+      <button id="plan-gen-btn" type="button">生成计划</button>
+      <button id="plan-exec-btn" type="button" disabled>执行计划</button>
+      <span id="plan-status" class="muted"></span>
+    </div>
+
+    <div id="plan-dag" class="plan-dag"></div>
+    <div id="plan-timeline" class="plan-timeline"></div>
+  </section>
+
+  <script src="/static/plan.js" defer></script>
+{{end}}

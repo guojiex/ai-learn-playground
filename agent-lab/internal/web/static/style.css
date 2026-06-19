@@ -538,3 +538,48 @@ dl.kv dd code { font-family: var(--mono); }
   background: var(--bg); padding: 8px 10px; border-radius: 4px;
   border: 1px solid var(--line);
 }
+
+/* ---------------- Plan 面板 (M6) ---------------- */
+.plan-page { display: flex; flex-direction: column; gap: 14px; }
+.plan-input-box { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.plan-input-box input[type="text"] {
+  flex: 1; min-width: 300px; padding: 6px 12px; font-size: 13px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--bg); color: var(--fg);
+}
+.plan-input-box button {
+  padding: 6px 18px; font-size: 13px; cursor: pointer;
+  border: none; border-radius: var(--radius);
+}
+.plan-input-box button#plan-gen-btn { background: var(--accent); color: white; }
+.plan-input-box button#plan-exec-btn { background: #28a745; color: white; }
+.plan-input-box button:disabled { opacity: 0.4; cursor: not-allowed; }
+.plan-dag { min-height: 100px; }
+.dag-levels { display: flex; align-items: flex-start; gap: 0; overflow-x: auto; padding: 10px 0; }
+.dag-level { display: flex; flex-direction: column; gap: 10px; min-width: 160px; }
+.dag-arrow { display: flex; align-items: center; padding: 20px 8px; color: var(--muted); font-size: 20px; }
+.dag-node {
+  border: 2px solid var(--line); border-radius: var(--radius);
+  padding: 8px 10px; background: var(--bg-elev); min-width: 140px;
+  transition: border-color 0.2s, background 0.2s;
+}
+.dag-node.dag-pending { border-color: var(--line); opacity: 0.7; }
+.dag-node.dag-running { border-color: #007bff; background: rgba(0,123,255,0.08); }
+.dag-node.dag-ok { border-color: #28a745; background: rgba(40,167,69,0.08); }
+.dag-node.dag-fail { border-color: #dc3545; background: rgba(220,53,69,0.08); }
+.dag-node.dag-replan { border-color: #fd7e14; background: rgba(253,126,20,0.08); }
+.dag-node.dag-skipped { border-color: var(--line); opacity: 0.4; border-style: dashed; }
+.dag-node-id { font-family: var(--mono); font-weight: 700; font-size: 12px; color: var(--accent); }
+.dag-node-name { font-size: 12px; margin: 2px 0; }
+.dag-node-kind { font-size: 10px; color: var(--muted); font-family: var(--mono); }
+.dag-node-status { margin-top: 4px; font-size: 11px; }
+.dag-icon { font-weight: 700; }
+.dag-output { margin: 4px 0 0; font-size: 10px; white-space: pre-wrap; word-break: break-word; max-height: 80px; overflow: auto; background: var(--bg); padding: 4px 6px; border-radius: 3px; border: 1px solid var(--line); }
+.dag-error { margin: 4px 0 0; font-size: 10px; color: #dc3545; white-space: pre-wrap; }
+.plan-timeline { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow-y: auto; }
+.timeline-item { font-size: 12px; padding: 4px 8px; border-radius: 4px; background: var(--bg-elev); border-left: 3px solid var(--line); }
+.timeline-item.ok { border-left-color: #28a745; }
+.timeline-item.fail { border-left-color: #dc3545; }
+.timeline-item.replan { border-left-color: #fd7e14; }
+.timeline-item.start { border-left-color: var(--accent); }
+.timeline-time { font-family: var(--mono); font-size: 10px; color: var(--muted); }

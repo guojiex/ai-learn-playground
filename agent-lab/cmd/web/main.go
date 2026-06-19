@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"ai-learn-playground/agent-lab/internal/agent"
 	"ai-learn-playground/agent-lab/internal/config"
 	"ai-learn-playground/agent-lab/internal/llm"
 	"ai-learn-playground/agent-lab/internal/memory"
@@ -104,6 +105,10 @@ func main() {
 	}
 	fmt.Fprintf(os.Stderr, "[agent-lab] tools=%v\n", reg.Names())
 
+	// M6: Planner + Executor.
+	planner := agent.NewPlanner(client, reg, cfg.ModelChat)
+	executor := agent.NewExecutor(planner, client, reg, cfg.ModelChat)
+
 	var srvOpts []web.ServerOption
 	srvOpts = append(srvOpts, web.WithToolRegistry(reg))
 	if st != nil {
@@ -115,6 +120,7 @@ func main() {
 	if retriever != nil {
 		srvOpts = append(srvOpts, web.WithRetriever(retriever))
 	}
+	srvOpts = append(srvOpts, web.WithPlannerExecutor(planner, executor))
 
 	srv, err := web.NewServer(cfg, client, srvOpts...)
 	if err != nil {

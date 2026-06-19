@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"time"
 
+	"ai-learn-playground/agent-lab/internal/agent"
 	"ai-learn-playground/agent-lab/internal/config"
 	"ai-learn-playground/agent-lab/internal/llm"
 	"ai-learn-playground/agent-lab/internal/memory"
@@ -34,6 +35,8 @@ type Server struct {
 	store         *store.Store
 	kv            *memory.KV
 	retriever     *rag.Retriever
+	executor      *agent.Executor
+	planner       *agent.Planner
 	defaultSystem string
 	budget        int
 	reserve       int
@@ -67,6 +70,14 @@ func WithMemory(kv *memory.KV) ServerOption {
 func WithRetriever(r *rag.Retriever) ServerOption {
 	return func(s *Server) {
 		s.retriever = r
+	}
+}
+
+// WithPlannerExecutor 注入 Planner + Executor, 启用 /plan 面板.
+func WithPlannerExecutor(planner *agent.Planner, executor *agent.Executor) ServerOption {
+	return func(s *Server) {
+		s.planner = planner
+		s.executor = executor
 	}
 }
 
@@ -144,6 +155,9 @@ func (s *Server) enabledNav() map[string]bool {
 	if s.retriever != nil {
 		enabled["/knowledge"] = true
 	}
+	if s.executor != nil {
+		enabled["/plan"] = true
+	}
 	return enabled
 }
 
@@ -193,6 +207,13 @@ func (s *Server) Routes() http.Handler {
 		mux.HandleFunc("/api/knowledge", s.handleKnowledgeAPI)
 	}
 
+	// Plan 面板 (M6): 仅在注入 Executor 时启用.
+	if s.executor != nil {
+		mux.HandleFunc("/plan", s.handlePlanPage)
+		mux.HandleFunc("/api/plan/generate", s.handlePlanGenerate)
+		mux.HandleFunc("/api/plan/execute", s.handlePlanExecute)
+	}
+
 	// 教程页.
 	mux.HandleFunc("/tutorial", s.handleTutorial)
 
@@ -209,6 +230,9 @@ func (s *Server) Routes() http.Handler {
 		if p.Path == "/knowledge" && s.retriever != nil {
 			continue
 		}
+		if p.Path == "/plan" && s.executor != nil {
+			continue
+		}
 		mux.HandleFunc(p.Path, func(w http.ResponseWriter, r *http.Request) {
 			s.renderPlaceholder(w, p)
 		})
@@ -222,7 +246,7 @@ func loadTemplates(enabled map[string]bool) (map[string]*template.Template, erro
 	funcs := template.FuncMap{
 		"navItems": func(active string) []NavItem { return navItems(active, enabled) },
 	}
-	pages := []string{"chat.html", "placeholder.html", "settings.html", "tools.html", "memory.html", "knowledge.html"}
+	pages := []string{"chat.html", "placeholder.html", "settings.html", "tools.html", "memory.html", "knowledge.html", "plan.html"}
 	out := make(map[string]*template.Template, len(pages))
 	var err error
 	for _, p := range pages {

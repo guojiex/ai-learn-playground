@@ -5,6 +5,84 @@
 
 ---
 
+## 2026-06-19 — M6 完成 (Planner-Executor: DAG 规划 + 分步执行 + 失败重规划)
+
+里程碑: M6 — 把 "走一步看一步" (ReAct) 升级为 "先整体规划, 再分步执行", 支持失败重规划
+
+### 已实现
+
+**Plan 数据结构: internal/agent/plan_types.go (新)**
+- `Plan` (goal + tasks[]), `Task` (id/name/depends/tool+args 或 agent+prompt), `TaskStatus` (pending/running/ok/fail/replan/skipped).
+- `TaskResult` / `PlanRun` / `ReplanRecord`: 完整执行轨迹, 可 dump JSON 供 M9 trace.
+- `Validate()`: ID 唯一 / 依赖存在 / tool-agent 互斥 / Kahn 拓扑排序检测环.
+- `ReadyTasks(done)`: 返回当前可执行的 task (依赖全部完成).
+- `TopoLevels()`: 把 DAG 分层, 同层可并行, 供 UI 列布局可视化.
+
+**Planner: internal/agent/planner.go (新)**
+- `Planner.Plan(ctx, goal)`: 一次 LLM 调用产出 Plan JSON, 解析失败最多重试 2 次 (复用 ReAct 的容错提取: 裸 JSON / ```json fenced / brace pair).
+- `Planner.Replan(ctx, goal, original, failedTaskID, failReason, completedOutputs)`: 把 "进展 + 失败原因" 喂回 LLM 生成新计划.
+- prompt 设计: 明确 JSON 协议, 注入可用工具列表, 给出典型流程 (kb_search → product_lookup → writer → platform_lint → composer).
+- agent 任务的 prompt 支持 `{t1.output}` 引用上游任务输出.
+
+**Executor: internal/agent/executor.go (新)**
+- `Executor.Execute(ctx, plan, events)`: 按 DAG 依赖调度, 同层无依赖节点并发执行 (受限并发度 4).
+- 两种子任务: tool (调 registry) / agent (调 LLM 生成文本).
+- 上下文裁剪: 每个子任务只看自己依赖的输出 (substituteRefs), 不看全局历史.
+- Replan: 子任务失败时调 Planner.Replan, 最多 maxReplan (2) 次; 失败节点的后续依赖标记为 skipped.
+- `ExecEvent` SSE 事件: task_done / task_fail / replan / plan_done / plan_fail, 推送给 UI 实时刷新.
+
+**CLI: cmd/plan/main.go (新)**
+- `-m "<目标>"` 生成计划 → 打印 DAG (分层 + 依赖) → 执行 → 打印结果.
+- `-dump <file>` 把执行轨迹 dump 成 JSON (供 M9 trace).
+- 实时输出执行进度 + 最终结果摘要 (状态/耗时/重规划次数/总 token).
+
+**Web UI: internal/web/**
+- `server.go`: 新增 `WithPlannerExecutor` 选项 + `planner`/`executor` 字段; `/plan` + `/api/plan/generate` + `/api/plan/execute` 路由.
+- `handlers_plan.go` (新): `GET /plan` 页面; `POST /api/plan/generate` (goal → Plan JSON + levels); `POST /api/plan/execute` (Plan → SSE 流式推送 ExecEvent).
+- `templates/plan.html` + `static/plan.js` (新): Plan 面板, goal 输入 + 生成/执行按钮 + DAG 列布局可视化 (节点状态颜色) + 执行时间线.
+- `static/style.css`: DAG 节点样式 (pending 灰 / running 蓝 / ok 绿 / fail 红 / replan 橙 / skipped 灰虚) + 时间线.
+- `templates/layout.html`: footer 改 `M6 · planner`.
+- `cmd/web/main.go`: 构造 Planner + Executor → `WithPlannerExecutor`.
+
+**测试**
+- `internal/agent/plan_types_test.go`: Validate (正常/重复ID/未知依赖/环/无tool-agent) / ReadyTasks / TopoLevels / parsePlan (裸JSON/fenced/带额外文本).
+- `internal/agent/executor_test.go`: 全部成功执行 / 失败跳过依赖 / 并行执行 (<90ms for 2x50ms) / 引用替换 / Planner 重试.
+
+### 启动方式
+
+```bash
+# 终端 A: fake 后端
+go run ./agent-lab/scripts/fake-openai
+
+# 终端 B: web
+OPENAI_BASE_URL=http://127.0.0.1:18080/v1 OPENAI_API_KEY=sk-local AGENTLAB_PROFILE=L \
+  go run ./agent-lab/cmd/web
+# 浏览器 http://127.0.0.1:8090/plan
+#   输入目标 → 生成计划 → 执行计划 (DAG 节点实时变色)
+
+# CLI 方式:
+OPENAI_BASE_URL=http://127.0.0.1:18080/v1 OPENAI_API_KEY=sk-local AGENTLAB_PROFILE=L \
+  go run ./agent-lab/cmd/plan -m "为 sku_001 在小红书台湾发一篇上新文案" -dump /tmp/plan.json
+```
+
+### 验收
+
+- [x] Planner 输出严格 JSON, 解析失败可兜底重新提问 (最多 2 次重试)
+- [x] Executor 支持串行 + 受限并发 (依赖图允许并行的节点并发跑, 并发度 4)
+- [x] 子任务失败时, Replan 至多 N 次 (默认 2), 超过则报最终失败
+- [x] 整次 Run 能 dump 一份 "plan + 实际执行轨迹" 的 JSON (CLI `-dump`)
+- [x] 单测覆盖: plan 验证 / 拓扑分层 / 并行执行 / 失败跳过 / 引用替换 / planner 重试
+- [x] `go vet` / `go build` / `go test ./...` 全部通过
+- [x] Web 冒烟测试: 手动构造 Plan → /api/plan/execute → SSE 推送 task_done + plan_done
+
+### 衔接
+
+下一站候选:
+- M7 (Multi-Agent: 把 Plan 中的 agent: writer / agent: composer 落成真正的多 agent 消息流)
+- M8 (HITL: 在 Plan 的关键节点引入人工审批)
+
+---
+
 ## 2026-06-19 — M5 完成 (RAG: embedding + 向量检索 + kb_search 工具)
 
 里程碑: M5 — 实现 RAG (Retrieval-Augmented Generation) 全链路: 文档切块 → embedding → 向量持久化 → cosine top-k 检索 → agent 工具调用 → Web 面板
