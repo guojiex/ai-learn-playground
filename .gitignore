@@ -41,3 +41,8 @@ lora/output/**/best/
 lora/output/**/*.safetensors
 lora/output/**/*.bin
 lora/output/**/training_state.pt
+
+# agent-lab SQLite 持久层 (M4): 运行期生成, 不入库
+agent-lab/data/agent.db
+agent-lab/data/agent.db-wal
+agent-lab/data/agent.db-shm

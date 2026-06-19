@@ -3,6 +3,7 @@
 // 本包包含两种模式:
 //   - native: 依赖 OpenAI 兼容 server 的原生 function-calling (M2, tooling.go).
 //   - react:  自写 JSON 协议的 Thought-Action-Observation 循环 (M3, react.go).
+//
 // 两种模式共用同一个 Agent 接口, 方便 CLI/Web 切换比较.
 package agent
 
@@ -22,11 +23,11 @@ var ErrMaxSteps = errors.New("max steps reached")
 type StepKind string
 
 const (
-	StepThought     StepKind = "thought"
-	StepAction      StepKind = "action"
-	StepObservation StepKind = "observation"
-	StepFinal       StepKind = "final"
-	StepParseRetry  StepKind = "parse_retry"
+	StepThought      StepKind = "thought"
+	StepAction       StepKind = "action"
+	StepObservation  StepKind = "observation"
+	StepFinal        StepKind = "final"
+	StepParseRetry   StepKind = "parse_retry"
 	StepParseDegrade StepKind = "parse_degrade"
 )
 
@@ -45,11 +46,11 @@ type Step struct {
 
 // RunResult 是一次 agent Run 的完整输出.
 type RunResult struct {
-	Final   string    `json:"final"`
-	Steps   []Step    `json:"steps"`
-	Mode    string    `json:"mode"` // "native" | "react"
+	Final   string        `json:"final"`
+	Steps   []Step        `json:"steps"`
+	Mode    string        `json:"mode"` // "native" | "react"
 	Elapsed time.Duration `json:"elapsed"`
-	Usage   llm.Usage `json:"usage"`
+	Usage   llm.Usage     `json:"usage"`
 }
 
 // Agent 是 agent 循环的统一抽象, NativeAgent 与 ReActAgent 都实现它.

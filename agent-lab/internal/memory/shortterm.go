@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"ai-learn-playground/agent-lab/internal/llm"
@@ -17,7 +16,9 @@ import (
 // ShortTerm 是一次会话的短期记忆.
 //
 // 不变量:
-//  budget 是 totalTokens <= budget; reserve 留给输出 tokens 预留.
+//
+//	budget 是 totalTokens <= budget; reserve 留给输出 tokens 预留.
+//
 // system prompt 单独存储, 不计入 msgs 的预算(会单独估算字符估算  估算 tokens.
 type ShortTerm struct {
 	system  string
@@ -99,11 +100,13 @@ func (m *ShortTerm) Snapshot() []llm.Message {
 
 // CompressInfo 记录一次压缩的结果信息, 用于 UI 展示.
 type CompressInfo struct {
-	DidCompress bool   // 是否发生了压缩
-	BeforeTurns int    // 压缩前轮数
-	AfterTurns  int    // 压缩后轮数
-	BeforeChars int    // 压缩前字符数
-	Summary     string // 摘要内容 (若未压缩为空)
+	DidCompress  bool   // 是否发生了压缩
+	BeforeTurns  int    // 压缩前轮数
+	AfterTurns   int    // 压缩后轮数
+	BeforeChars  int    // 压缩前字符数
+	BeforeTokens int    // 压缩前 token 估算 (M4)
+	AfterTokens  int    // 压缩后 token 估算 (M4)
+	Summary      string // 摘要内容 (若未压缩为空)
 }
 
 // EnsureBudget 检查当前历史 (不含最新一条) 的 token 估算是否超预算,
@@ -113,11 +116,15 @@ type CompressInfo struct {
 //  1. 先尝试简单滑窗: 如果最旧的一条丢掉后 <= budget-reserve, 直接丢.
 //  2. 如果还是超, 调 LLM 摘要最旧一半轮为一条 summary 并替换.
 //
-// client 可能为 nil, 此时降级为简单滑窗.
+// client 可能为 nil, 此时 Summarizer 降级为拼接式 fallback (仍会压缩, 不丢关键字).
 func (m *ShortTerm) EnsureBudget(ctx context.Context, client llm.Client, model string, maxTokens int) (CompressInfo, error) {
 	available := m.budget - m.reserve
 	current := m.estimateAllTokens()
-	info := CompressInfo{BeforeTurns: len(m.msgs), BeforeChars: m.countChars()}
+	info := CompressInfo{
+		BeforeTurns:  len(m.msgs),
+		BeforeChars:  m.countChars(),
+		BeforeTokens: current,
+	}
 	if current <= available {
 		return info, nil
 	}
@@ -128,41 +135,19 @@ func (m *ShortTerm) EnsureBudget(ctx context.Context, client llm.Client, model s
 	if m.estimateAllTokens() <= available {
 		info.DidCompress = true
 		info.AfterTurns = len(m.msgs)
+		info.AfterTokens = m.estimateAllTokens()
 		return info, nil
 	}
 	// LLM 摘要: 把最旧的一半合并为一条 summary.
-	if client == nil {
-		// 没有 client, 继续滑窗降级.
-		for len(m.msgs) > 2 && m.estimateAllTokens() > available {
-			m.msgs = m.msgs[2:]
-		}
-		info.DidCompress = true
-		info.AfterTurns = len(m.msgs)
-		return info, nil
-	}
 	half := len(m.msgs) / 2
 	if half < 2 {
 		// 只剩两条没法摘要了.
 		return info, nil
 	}
-	oldHalf := make([]llm.Message, 0, half)
+	summarizer := NewSummarizer(client, model, maxTokens)
+	oldHalf := make([]llm.Message, half)
 	copy(oldHalf, m.msgs[:half])
-	// 构造摘要请求.
-	summarize := "请把下面这些旧对话压缩成一段简短摘要. 保留关键商品信息和风格关键字. 不要超过 300 字.\n\n"
-	for _, msg := range oldHalf {
-		summarize += fmt.Sprintf("%s: %s\n", msg.Role, msg.Content)
-	}
-	req := llm.ChatRequest{
-		Model: model,
-		Messages: []llm.Message{
-			{Role: llm.RoleSystem, Content: "你是一个简洁的摘要器."},
-			{Role: llm.RoleUser, Content: summarize},
-		},
-		Temperature: float32Ptr(0.3),
-		MaxTokens:   intPtr(maxTokens),
-		Stream:      false,
-	}
-	resp, err := client.Chat(ctx, req)
+	summary, err := summarizer.Summarize(ctx, oldHalf)
 	if err != nil {
 		// 摘要失败, 退化为滑窗.
 		for len(m.msgs) > 2 {
@@ -170,11 +155,8 @@ func (m *ShortTerm) EnsureBudget(ctx context.Context, client llm.Client, model s
 		}
 		info.DidCompress = true
 		info.AfterTurns = len(m.msgs)
+		info.AfterTokens = m.estimateAllTokens()
 		return info, fmt.Errorf("summary fallback to sliding window: %w", err)
-	}
-	summary := strings.TrimSpace(resp.Message.Content)
-	if summary == "" {
-		summary = "[旧对话已压缩]"
 	}
 	// 用一条 assistant message 替换最旧 half 条.
 	newMsgs := make([]llm.Message, 0, len(m.msgs)-half+1)
@@ -183,6 +165,7 @@ func (m *ShortTerm) EnsureBudget(ctx context.Context, client llm.Client, model s
 	m.msgs = newMsgs
 	info.DidCompress = true
 	info.AfterTurns = len(m.msgs)
+	info.AfterTokens = m.estimateAllTokens()
 	info.Summary = summary
 	return info, nil
 }
@@ -223,13 +206,13 @@ func (m *ShortTerm) Messages() []llm.Message {
 // SaveToFile 把 system + 历史存成 JSON, 方便持久化.
 func (m *ShortTerm) SaveToFile(path string) error {
 	data := struct {
-		System  string        `json:"system"`
-		Messages []llm.Message `json:"messages"`
-		CreatedAt time.Time `json:"created_at"`
+		System    string        `json:"system"`
+		Messages  []llm.Message `json:"messages"`
+		CreatedAt time.Time     `json:"created_at"`
 	}{
-		System:     m.system,
-		Messages:   m.msgs,
-		CreatedAt:  time.Now(),
+		System:    m.system,
+		Messages:  m.msgs,
+		CreatedAt: time.Now(),
 	}
 	b, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
@@ -245,7 +228,7 @@ func (m *ShortTerm) LoadFromFile(path string) error {
 		return err
 	}
 	var data struct {
-		System  string        `json:"system"`
+		System   string        `json:"system"`
 		Messages []llm.Message `json:"messages"`
 	}
 	if err := json.Unmarshal(b, &data); err != nil {

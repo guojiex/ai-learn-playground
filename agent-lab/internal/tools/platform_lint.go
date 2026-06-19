@@ -13,9 +13,10 @@ import (
 // PlatformLint 检查电商文案是否符合各平台限制 (字数 / 敏感词 / 标签数).
 //
 // 平台规则 (M2 演示用, 真实规则会随平台变更):
-//   shopee_tw: 标题 ≤ 60 字; 禁词: 最高/第一/绝对; 标签 (#) ≤ 8.
-//   pchome:    标题 ≤ 50 字; 禁词: 最便宜/限定独家; 标签 ≤ 5.
-//   momo:      标题 ≤ 55 字; 禁词: 第一/独家; 标签 ≤ 6.
+//
+//	shopee_tw: 标题 ≤ 60 字; 禁词: 最高/第一/绝对; 标签 (#) ≤ 8.
+//	pchome:    标题 ≤ 50 字; 禁词: 最便宜/限定独家; 标签 ≤ 5.
+//	momo:      标题 ≤ 55 字; 禁词: 第一/独家; 标签 ≤ 6.
 type PlatformLint struct{}
 
 // NewPlatformLint 构造工具.
@@ -27,7 +28,7 @@ func (PlatformLint) Schema() llm.ToolSchema {
 		"platform_lint",
 		"按目标平台校验电商文案 (标题/正文): 字数上限、敏感词、标签数上限. 返回 ok / 违规清单. 用于在生成最终文案前做安全检查.",
 		map[string]any{
-			"type": "object",
+			"type":     "object",
 			"required": []string{"platform", "text"},
 			"properties": map[string]any{
 				"platform": map[string]any{"type": "string", "enum": []string{"shopee_tw", "pchome", "momo"}},

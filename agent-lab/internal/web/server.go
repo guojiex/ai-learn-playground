@@ -6,29 +6,35 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"html/template"
 	"io/fs"
 	"net/http"
+	"time"
 
 	"ai-learn-playground/agent-lab/internal/config"
 	"ai-learn-playground/agent-lab/internal/llm"
+	"ai-learn-playground/agent-lab/internal/memory"
 	"ai-learn-playground/agent-lab/internal/prompt"
+	"ai-learn-playground/agent-lab/internal/store"
 	"ai-learn-playground/agent-lab/internal/tools"
 )
 
 // Server 是 web 模块的入口对象.
 type Server struct {
-	cfg       config.Config
-	llm       llm.Client
-	pages     map[string]*template.Template
-	static    http.FileSystem
-	convs     *ConversationStore
-	tools     *tools.Registry
-	toolHist  *ToolRecentBuffer
+	cfg           config.Config
+	llm           llm.Client
+	pages         map[string]*template.Template
+	static        http.FileSystem
+	convs         *ConversationStore
+	tools         *tools.Registry
+	toolHist      *ToolRecentBuffer
+	store         *store.Store
+	kv            *memory.KV
 	defaultSystem string
-	budget    int
-	reserve   int
+	budget        int
+	reserve       int
 }
 
 // ServerOption 用于自定义 NewServer 行为.
@@ -38,6 +44,20 @@ type ServerOption func(*Server)
 func WithToolRegistry(reg *tools.Registry) ServerOption {
 	return func(s *Server) {
 		s.tools = reg
+	}
+}
+
+// WithStore 注入 SQLite 持久层, 启用会话持久化 (write-through + 启动 hydrate).
+func WithStore(st *store.Store) ServerOption {
+	return func(s *Server) {
+		s.store = st
+	}
+}
+
+// WithMemory 注入长期记忆 KV, 启用 /memory 面板与 memory_get/memory_put 工具.
+func WithMemory(kv *memory.KV) ServerOption {
+	return func(s *Server) {
+		s.kv = kv
 	}
 }
 
@@ -61,12 +81,42 @@ func NewServer(cfg config.Config, client llm.Client, opts ...ServerOption) (*Ser
 	for _, opt := range opts {
 		opt(s)
 	}
+	// 注入 store 后: 让会话 store 走 write-through, 并把磁盘上的历史会话拉回内存.
+	if s.store != nil {
+		s.convs.EnablePersistence(s.store)
+		if err := s.hydrateConversations(); err != nil {
+			fmt.Printf("[web] hydrate conversations: %v\n", err)
+		}
+	}
 	pages, err := loadTemplates(s.enabledNav())
 	if err != nil {
 		return nil, err
 	}
 	s.pages = pages
 	return s, nil
+}
+
+// hydrateConversations 把 agent.db 里的会话全部加载回内存, 实现 "重启不丢历史".
+func (s *Server) hydrateConversations() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	rows, err := s.store.ListConversations(ctx)
+	if err != nil {
+		return err
+	}
+	for _, row := range rows {
+		_, msgs, err := s.store.LoadConversation(ctx, row.ID)
+		if err != nil {
+			fmt.Printf("[web] load conversation %s: %v\n", row.ID, err)
+			continue
+		}
+		s.convs.Restore(row.ID, row.SellerID, row.Title, row.System,
+			time.Unix(row.UpdatedAt, 0), msgs, s.budget, s.reserve)
+	}
+	if len(rows) > 0 {
+		fmt.Printf("[web] hydrated %d conversations from agent.db\n", len(rows))
+	}
+	return nil
 }
 
 // enabledNav 返回当前 server 启用了哪些非占位面板, 给模板 navItems 用.
@@ -78,6 +128,9 @@ func (s *Server) enabledNav() map[string]bool {
 	}
 	if s.tools != nil {
 		enabled["/tools"] = true
+	}
+	if s.kv != nil {
+		enabled["/memory"] = true
 	}
 	return enabled
 }
@@ -92,7 +145,7 @@ func (s *Server) Routes() http.Handler {
 	// 健康检查.
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true,"milestone":"M1"}`))
+		_, _ = w.Write([]byte(`{"ok":true,"milestone":"M4"}`))
 	})
 
 	// 入口重定向.
@@ -116,6 +169,12 @@ func (s *Server) Routes() http.Handler {
 		mux.HandleFunc("/api/tools/invoke", s.handleToolsInvoke)
 	}
 
+	// Memory 面板 (M4): 仅在注入 KV 时启用.
+	if s.kv != nil {
+		mux.HandleFunc("/memory", s.handleMemoryPage)
+		mux.HandleFunc("/api/memory", s.handleMemoryAPI)
+	}
+
 	// 教程页.
 	mux.HandleFunc("/tutorial", s.handleTutorial)
 
@@ -124,6 +183,9 @@ func (s *Server) Routes() http.Handler {
 		p := p
 		// 已实装的面板跳过占位注册.
 		if p.Path == "/tools" && s.tools != nil {
+			continue
+		}
+		if p.Path == "/memory" && s.kv != nil {
 			continue
 		}
 		mux.HandleFunc(p.Path, func(w http.ResponseWriter, r *http.Request) {
@@ -139,7 +201,7 @@ func loadTemplates(enabled map[string]bool) (map[string]*template.Template, erro
 	funcs := template.FuncMap{
 		"navItems": func(active string) []NavItem { return navItems(active, enabled) },
 	}
-	pages := []string{"chat.html", "placeholder.html", "settings.html", "tools.html"}
+	pages := []string{"chat.html", "placeholder.html", "settings.html", "tools.html", "memory.html"}
 	out := make(map[string]*template.Template, len(pages))
 	var err error
 	for _, p := range pages {

@@ -2,7 +2,7 @@
 
 从零手写一个 Agent 学习实验室。**纯 Go**、**全程使用本地大模型**、**不依赖任何云端 API**。业务场景统一围绕**台湾电商文案**，沿 11 个里程碑从单轮对话推进到 multi-agent + planner + HITL + 评测 + 路由。
 
-本目录当前只产出**设计文档**。代码会在按里程碑推进时再落地。
+本目录的设计文档已全部完成，代码按里程碑逐步落地 (M0–M4 已完成)。
 
 ## 阅读顺序
 
@@ -36,7 +36,9 @@
 | M0 Web UI | 完成 (`cmd/web` + `internal/web`, SSE 流式 + 占位面板) |
 | M1 代码 | 完成 (`internal/memory` + `internal/prompt` + 多会话 / 角色卡 / 摘要压缩) |
 | M2 代码 | 完成 (`internal/tools` + `internal/agent` + `cmd/agent` + Web `/tools`) |
-| M3–M11 代码 | 未开始 |
+| M3 代码 | 完成 (`internal/agent` ReAct + `--mode=react` + step 卡片) |
+| M4 代码 | 完成 (`internal/store` SQLite + 长期 KV + Summarizer + Web `/memory` + 会话持久化) |
+| M5–M11 代码 | 未开始 |
 
 ## M0 快速跑通
 
@@ -79,4 +81,4 @@ $env:AGENTLAB_PROFILE="L"
 go run .\agent-lab\cmd\web                 # 默认 127.0.0.1:8090
 ```
 
-UI 当前包含：Chat (M0 单会话, 流式 + 停止) / Settings (运行时配置) / 其余面板占位 (`Tools` / `Plan` / `Multi-Agent` / `Approvals` / `Traces` / `Router` 等里程碑陆续启用)。
+UI 当前包含：Chat (多轮对话 / 流式 / native+react 模式 / seller 切换) / Tools (工具 schema + 试调用) / Memory (长期记忆 KV 浏览, M4) / Settings (运行时配置) / 其余面板占位 (`Plan` / `Multi-Agent` / `Approvals` / `Traces` / `Router` 等里程碑陆续启用)。会话与长期记忆默认落 `agent-lab/data/agent.db` (M4)，重启不丢历史。

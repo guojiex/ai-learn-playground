@@ -1,0 +1,27 @@
+{{define "content"}}
+  <header class="topbar">
+    <div class="topbar-title">
+      <h1>Memory</h1>
+      <span class="muted">M4 · 长期记忆 KV (跨会话, SQLite)</span>
+    </div>
+    <div class="topbar-meta">
+      <span class="chip">profile <strong>{{.Profile}}</strong></span>
+      <span class="chip">model <strong>{{.Model}}</strong></span>
+    </div>
+  </header>
+
+  <section class="memory-page">
+    <div class="memory-toolbar">
+      <button id="mem-refresh" type="button" class="ghost">刷新</button>
+      <span id="mem-status" class="muted"></span>
+    </div>
+    <p class="muted memory-hint">
+      浏览 agent 通过 <code>memory_put</code> 写入的长期记忆. namespace 形如
+      <code>seller:A001</code>, key 通常是 <code>tone</code> / <code>keywords</code>.
+      写入由 agent 工具驱动; 这里可"遗忘"单条记忆.
+    </p>
+    <div id="mem-tree" class="mem-tree"></div>
+  </section>
+
+  <script src="/static/memory.js" defer></script>
+{{end}}

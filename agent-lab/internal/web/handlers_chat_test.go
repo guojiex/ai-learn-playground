@@ -40,7 +40,7 @@ func (f *fakeStreamClient) ChatStream(ctx context.Context, req llm.ChatRequest) 
 	return out, nil
 }
 
-func newTestServer(t *testing.T, client llm.Client) *Server {
+func newTestServer(t *testing.T, client llm.Client, opts ...ServerOption) *Server {
 	t.Helper()
 	cfg := config.Config{
 		Profile:        "L",
@@ -50,7 +50,7 @@ func newTestServer(t *testing.T, client llm.Client) *Server {
 		RequestTimeout: 10 * time.Second,
 		MaxRetries:     1,
 	}
-	srv, err := NewServer(cfg, client)
+	srv, err := NewServer(cfg, client, opts...)
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}

@@ -5,6 +5,129 @@
 
 ---
 
+## 2026-06-19 — M4 完成 (记忆: 短期摘要 + 长期 KV + SQLite)
+
+里程碑: M4 — 把 M1 的短期滑窗升级为"滑窗+摘要"双层, 引入跨会话长期记忆 (KV), 用 SQLite 做单文件持久层
+
+### 已实现
+
+**SQLite 持久层: internal/store/ (新包)**
+- 驱动选 `modernc.org/sqlite` (纯 Go, 无 CGO), 这是项目第一个外部依赖, 与 ADR-0005 一致.
+- `sqlite.go`: `Open(path)` 打开/创建 `agent.db`, 设 WAL + busy_timeout + synchronous=NORMAL, 跑 migration.
+- 单连接策略: `SetMaxOpenConns(1)` 让 `database/sql` 串行化所有操作, 彻底避免多连接竞争导致的 `SQLITE_BUSY`, 也让 `:memory:` 在池里共享同一库.
+- `migrations.go`: 幂等 schema (`CREATE TABLE IF NOT EXISTS`): `memory_kv` / `conversations` / `conversation_messages` / `schema_meta`.
+- KV 操作: `PutKV` (upsert ON CONFLICT) / `GetKV` / `DeleteKV` / `ListKV` / `Namespaces`.
+- 会话操作: `SaveConversation` (upsert 会话行 + 全量替换消息, 100% 还原含 tool_calls) / `LoadConversation` / `ListConversations` / `DeleteConversation` (事务删两表).
+
+**长期记忆: internal/memory/kv.go (新)**
+- `KV` 在 store 之上加 namespace 约定: `seller:{id}` 分区, `tone` / `keywords` 为键.
+- `SellerNamespace(sellerID)` 辅助函数.
+- Put/Get/Delete/List/Namespaces 透传 store, nil store 时显式报错.
+
+**摘要器: internal/memory/summarizer.go (新)**
+- 把 M1 内联在 `EnsureBudget` 里的 LLM 摘要逻辑抽成独立 `Summarizer` 类型, 可单测、可被 M6 planner 复用.
+- `Summarize(ctx, msgs)`: 调 LLM 压成 ≤300 字摘要; client 为 nil 或出错时走 `fallbackSummary` (拼接首句, 不丢关键字).
+- `CompressInfo` 新增 `BeforeTokens` / `AfterTokens`, UI 摘要提示带上"压缩前/后 token 估算".
+- `ShortTerm.EnsureBudget` 改用 `Summarizer`, 在每个压缩分支填上 token 估算.
+
+**记忆工具: internal/tools/memory_get.go + memory_put.go (新)**
+- `memory_get(namespace, key)`: agent 读长期记忆, 返回 `{found, value}`.
+- `memory_put(namespace, key, value)`: agent 写长期记忆, value 必须是合法 JSON (校验后才入库).
+- 两个工具自动注册到 web 的 tools registry, /tools 面板可试调用.
+
+**Web UI 改造: internal/web/**
+- `conversation.go`: `Conversation` 加 `SellerID` / `CreatedAt`; `ConversationStore` 加 `store *store.Store`, 支持 write-through (`EnablePersistence` / `Persist` / `Restore`); `New/Rename/Delete` 落库, 幂等删除.
+- `server.go`: 新增 `WithStore` / `WithMemory` 选项; 注入 store 后 `EnablePersistence` + 启动 `hydrateConversations` (从 agent.db 把历史会话拉回内存, 实现"重启不丢历史"); 新增 `/memory` + `/api/memory` 路由; `enabledNav` / `loadTemplates` 接入 memory.html.
+- `handlers_memory.go` (新): `GET /memory` 页面; `GET /api/memory` 按 namespace 折叠列出 KV; `DELETE /api/memory` 遗忘单条 (被遗忘权).
+- `handlers_chat.go`: `chatAPIRequest` 加 `seller_id`; 发送时 `sellerHint` 注入 system prompt 引导 agent 用 memory_get/put; `summary` SSE 加 `before_tokens/after_tokens`; `finalizeChatSend`/`set_system`/`reset`/`load` 调 `persistConv` 落库; `switch` 返回 `seller_id`.
+- `templates/memory.html` + `static/memory.js` (新): Memory 面板, namespace 折叠树, value 美化 JSON, 单条遗忘按钮.
+- `templates/chat.html` + `static/chat.js`: composer 加 `seller` 输入框 (带 datalist); 会话列表标题前缀 `[卖家ID]`; switch/done 同步 seller_id; 摘要提示显示 token 估算.
+- `templates/layout.html`: 新增 memory 图标 (数据库圆柱); sidebar-foot 改 `M4 · memory`.
+- `nav.go` + `placeholders()`: 新增 Memory 导航项与占位.
+- `cmd/web/main.go`: `-db` flag (默认 `AGENTLAB_DB_PATH` → `agent-lab/data/agent.db`); 打开 store → 建 KV → 注册 memory 工具 → `WithStore`+`WithMemory`; store 打开失败不致命, 退化为纯内存会话.
+- `.gitignore`: 忽略 `agent-lab/data/agent.db{,-wal,-shm}`.
+
+**测试**
+- `internal/store/sqlite_test.go`: migration 幂等 (二次开库)、KV 增删改查 + 覆盖、**50 goroutine 并发写不破坏 schema**、会话 save/load/重开还原/全量替换/删除.
+- `internal/memory/kv_test.go`: KV 读写列表删除 + 空值拒绝.
+- `internal/memory/summarizer_test.go`: 摘要器调用 LLM / nil client fallback / 错误传播; `EnsureBudget` 越界触发摘要并填 token 估算 / 未越界不调 LLM.
+- `internal/tools/memory_test.go`: memory_put/get 往返 / not found / 拒绝非 JSON value / 必填校验.
+- `internal/web/handlers_memory_test.go`: /memory 渲染、未配置时占位、/api/memory 列表 + 遗忘.
+
+### 文件清单 (相对 agent-lab)
+
+```
+├── go.mod / go.sum                           (改, +modernc.org/sqlite)
+├── cmd/web/main.go                           (改, -db flag + store/kv/memory 工具装配)
+├── internal/
+│   ├── store/                                (新包)
+│   │   ├── sqlite.go                         (Open + KV + 会话持久化)
+│   │   ├── migrations.go                     (幂等 schema)
+│   │   └── sqlite_test.go                    (新)
+│   ├── memory/
+│   │   ├── shortterm.go                      (改, CompressInfo 加 token 字段, EnsureBudget 用 Summarizer)
+│   │   ├── summarizer.go                     (新, Summarizer 类型)
+│   │   ├── kv.go                             (新, 长期 KV 门面)
+│   │   ├── kv_test.go                        (新)
+│   │   └── summarizer_test.go                (新)
+│   ├── tools/
+│   │   ├── memory_get.go                     (新)
+│   │   ├── memory_put.go                     (新)
+│   │   └── memory_test.go                    (新)
+│   └── web/
+│       ├── conversation.go                   (改, seller_id + write-through 持久化)
+│       ├── server.go                         (改, WithStore/WithMemory + hydrate + /memory 路由)
+│       ├── handlers_chat.go                  (改, seller_id + token 估算 + persist)
+│       ├── handlers_memory.go                (新, /memory + /api/memory)
+│       ├── handlers_memory_test.go           (新)
+│       ├── handlers_tools.go                 (改, memory 工具示例)
+│       ├── nav.go                            (改, Memory 导航/占位)
+│       ├── templates/
+│       │   ├── chat.html                     (改, seller 输入框)
+│       │   ├── layout.html                   (改, memory 图标 + M4 foot)
+│       │   └── memory.html                   (新)
+│       └── static/
+│           ├── chat.js                       (改, seller_id + token 估算)
+│           ├── memory.js                     (新)
+│           └── style.css                     (改, memory 面板样式)
+└── .gitignore                                (改, 忽略 agent.db*)
+```
+
+### 启动方式
+
+Web (默认落库到 `agent-lab/data/agent.db`, 重启不丢历史):
+
+```bash
+# 终端 A: fake 后端 (无需本地大模型)
+go run ./agent-lab/scripts/fake-openai
+
+# 终端 B: web
+OPENAI_BASE_URL=http://127.0.0.1:18080/v1 OPENAI_API_KEY=sk-local AGENTLAB_PROFILE=L \
+  go run ./agent-lab/cmd/web
+# 浏览器 http://127.0.0.1:8090
+#   /chat   composer 上方填 seller (如 A001), 发送后 agent 可用 memory_get/put
+#   /memory 浏览/遗忘长期记忆 KV
+```
+
+换真实模型: 把 `OPENAI_BASE_URL` 指向 `llama-server` / `ollama` 即可. 自定义库路径: `-db /path/to/agent.db` 或 `AGENTLAB_DB_PATH`.
+
+### 验收
+
+- [x] `agent.db` 自动初始化, schema migration 幂等 (二次开库不报错)
+- [x] 短期摘要触发后, SSE `summary` 事件带"摘要前 vs 摘要后" token 估算
+- [x] 长期 KV 支持 `seller:{id}:tone` / `seller:{id}:keywords` 两个 namespace (memory_get/put 工具)
+- [x] 整段 conversation 持久化并 100% 还原 (重启后 switch 仍能拿回全部消息 + system + seller_id)
+- [x] 单测覆盖: 摘要被调用、KV 读写、50 goroutine 并发写不破坏 schema
+- [x] `go vet ./...` / `go build ./...` / `go test ./...` 全部通过
+
+### 衔接
+
+下一站候选:
+- M5 (RAG: embedding + chunking + 向量检索, 复用同一 agent.db)
+- M6 (Planner-Executor: 上下文裁剪依赖 M4 的 summarizer)
+
+---
+
 ## 2026-06-14 — M3 完成 (手写 ReAct Agent)
 
 里程碑: M3 — 不依赖原生 function calling 的 ReAct 协议, 与 M2 互为对照

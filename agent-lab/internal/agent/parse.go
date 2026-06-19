@@ -136,6 +136,7 @@ func extractFirstBracePair(text string) (string, bool) {
 //   - 紧跟 '{', ',', '}' 或 ':'
 //   - 紧跟空白
 //   - 在文本最开头/结尾
+//
 // 这样能覆盖 1.8B 模型常输出的 "{'name':'foo'}" 这种格式.
 func normalizeSingleQuotes(s string) string {
 	runes := []rune(s)

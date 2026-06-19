@@ -8,6 +8,7 @@
 //	go run ./agent-lab/cmd/web
 //
 // 默认 listen 127.0.0.1:8090. 用 -addr 覆盖.
+// 默认 SQLite 库为 agent-lab/data/agent.db, 用 -db 覆盖 (M4).
 package main
 
 import (
@@ -23,6 +24,8 @@ import (
 
 	"ai-learn-playground/agent-lab/internal/config"
 	"ai-learn-playground/agent-lab/internal/llm"
+	"ai-learn-playground/agent-lab/internal/memory"
+	"ai-learn-playground/agent-lab/internal/store"
 	"ai-learn-playground/agent-lab/internal/tools"
 	"ai-learn-playground/agent-lab/internal/web"
 )
@@ -31,9 +34,11 @@ func main() {
 	var (
 		addr    string
 		dataDir string
+		dbPath  string
 	)
 	flag.StringVar(&addr, "addr", "127.0.0.1:8090", "listen address")
 	flag.StringVar(&dataDir, "data", "agent-lab/data/products", "tools 工具用的 products.json 所在目录")
+	flag.StringVar(&dbPath, "db", "", "SQLite 路径 (默认读 AGENTLAB_DB_PATH, 再退回 agent-lab/data/agent.db); :memory: 走纯内存")
 	flag.Parse()
 
 	cfg, err := config.Load()
@@ -43,19 +48,55 @@ func main() {
 	}
 	fmt.Fprintf(os.Stderr, "[agent-lab] %s\n", cfg.String())
 
+	if dbPath == "" {
+		dbPath = cfg.DBPath
+	}
+
 	client := llm.NewOpenAIClient(
 		cfg.BaseURL, cfg.APIKey, cfg.RequestTimeout,
 		llm.WithMaxRetries(cfg.MaxRetries),
 	)
+
+	// M4: 打开 SQLite 持久层 (agent.db), 失败不致命 — 退化为纯内存会话.
+	var st *store.Store
+	if dbPath != "" {
+		st, err = store.Open(dbPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[agent-lab] open store %s: %v (退化为内存模式)\n", dbPath, err)
+			st = nil
+		} else {
+			fmt.Fprintf(os.Stderr, "[agent-lab] store=%s\n", dbPath)
+			defer st.Close()
+		}
+	}
+
+	// 长期记忆 KV 绑定到同一个 store.
+	var kv *memory.KV
+	if st != nil {
+		kv = memory.NewKV(st)
+	}
 
 	reg := tools.NewRegistry()
 	reg.Register(tools.NewProductLookup(dataDir))
 	reg.Register(tools.NewPriceFormat())
 	reg.Register(tools.NewPlatformLint())
 	reg.Register(tools.NewSlangCheck())
+	if kv != nil {
+		reg.Register(tools.NewMemoryGet(kv))
+		reg.Register(tools.NewMemoryPut(kv))
+	}
 	fmt.Fprintf(os.Stderr, "[agent-lab] tools=%v\n", reg.Names())
 
-	srv, err := web.NewServer(cfg, client, web.WithToolRegistry(reg))
+	var srvOpts []web.ServerOption
+	srvOpts = append(srvOpts, web.WithToolRegistry(reg))
+	if st != nil {
+		srvOpts = append(srvOpts, web.WithStore(st))
+	}
+	if kv != nil {
+		srvOpts = append(srvOpts, web.WithMemory(kv))
+	}
+
+	srv, err := web.NewServer(cfg, client, srvOpts...)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "init server:", err)
 		os.Exit(1)

@@ -12,7 +12,7 @@ var personaFS embed.FS
 
 // Persona 描述一个角色卡.
 type Persona struct {
-	Name        string
+	Name         string
 	SystemPrompt string
 }
 

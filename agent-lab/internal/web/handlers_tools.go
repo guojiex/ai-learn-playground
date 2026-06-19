@@ -13,11 +13,11 @@ import (
 )
 
 type toolsPageData struct {
-	Title    string
-	Active   string
-	Schemas  []toolSchemaView
-	Profile  string
-	Model    string
+	Title   string
+	Active  string
+	Schemas []toolSchemaView
+	Profile string
+	Model   string
 }
 
 type toolSchemaView struct {
@@ -34,6 +34,8 @@ var toolExamples = map[string]string{
 	"price_format":   `{"price_twd":690,"shipping":"現貨","badges":["限時免運"]}`,
 	"platform_lint":  `{"platform":"shopee_tw","kind":"title","text":"日本製今治毛巾 蓬鬆吸水 #毛巾 #日本"}`,
 	"slang_check":    `{"text":"限時下殺 現貨免運, CP值高的必買神器"}`,
+	"memory_get":     `{"namespace":"seller:A001","key":"tone"}`,
+	"memory_put":     `{"namespace":"seller:A001","key":"tone","value":"{\"style\":\"girlfriend\",\"emoji\":\"high\",\"price_position\":\"end\"}"}`,
 }
 
 func (s *Server) handleToolsPage(w http.ResponseWriter, r *http.Request) {

@@ -17,6 +17,8 @@
   const $mode     = document.getElementById("mode");
   const $temp     = document.getElementById("temperature");
   const $maxTk    = document.getElementById("max-tokens");
+  const $seller   = document.getElementById("seller-id");
+  const $sellerList = document.getElementById("seller-list");
 
   // 当前会话 ID, 初次为 "" (将在首次发送时由服务端生成).
   let currentConv = "";
@@ -45,20 +47,23 @@
 
   function renderConvList(convs) {
     $convList.innerHTML = "";
+    // 顺便收集出现过的 seller_id, 填进输入框的 datalist 方便切换.
+    const sellers = new Set();
     if (convs.length === 0) {
       const li = document.createElement("li");
       li.className = "conv-empty";
       li.textContent = "还没有会话";
       $convList.appendChild(li);
-      return;
     }
     for (const c of convs) {
+      if (c.seller_id) sellers.add(c.seller_id);
       const li = document.createElement("li");
       li.className = "conv-item" + (c.id === currentConv ? " active" : "");
       li.dataset.id = c.id;
       const title = document.createElement("span");
       title.className = "conv-title";
-      title.textContent = c.title || "(无标题)";
+      const label = c.seller_id ? `[${c.seller_id}] ` + (c.title || "(无标题)") : (c.title || "(无标题)");
+      title.textContent = label;
       title.title = "点击切换会话";
       title.addEventListener("click", () => switchConversation(c.id));
       const actions = document.createElement("span");
@@ -79,6 +84,14 @@
       li.appendChild(actions);
       $convList.appendChild(li);
     }
+    if ($sellerList) {
+      $sellerList.innerHTML = "";
+      for (const s of sellers) {
+        const opt = document.createElement("option");
+        opt.value = s;
+        $sellerList.appendChild(opt);
+      }
+    }
   }
 
   async function switchConversation(id) {
@@ -92,6 +105,7 @@
     const data = await resp.json();
     currentConv = data.id;
     currentTitle = data.title || "";
+    if ($seller) $seller.value = data.seller_id || "";
     if (data.system) $system.value = data.system;
     $messages.innerHTML = "";
     if (data.messages) {
@@ -346,6 +360,7 @@
           action: "send",
           conversation_id: currentConv,
           system: $system.value,
+          seller_id: ($seller && $seller.value) || "",
           message: msg,
           mode: mode,
           temperature: isNaN(temperature) ? 0.4 : temperature,
@@ -383,7 +398,11 @@
           }
           if (evt.event === "summary" && evt.data) {
             const d = evt.data;
-            const text = `摘要: 压缩 ${d.before_turns} → ${d.after_turns} 轮` + (d.summary ? `: ${d.summary}` : "");
+            let text = `摘要: 压缩 ${d.before_turns} → ${d.after_turns} 轮`;
+            if (d.before_tokens || d.after_tokens) {
+              text += ` (≈${d.before_tokens} → ${d.after_tokens} tokens)`;
+            }
+            if (d.summary) text += `: ${d.summary}`;
             addNote(text);
             continue;
           }
@@ -415,6 +434,7 @@
             addNote("已停止");
           } else if (evt.event === "done" && evt.data && evt.data.conversation_id) {
             if (evt.data.title) currentTitle = evt.data.title;
+            if (evt.data.seller_id && $seller) $seller.value = evt.data.seller_id;
           }
         }
       }

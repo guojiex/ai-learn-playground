@@ -36,14 +36,14 @@ import (
 
 func main() {
 	var (
-		initialMsg string
-		modelOver  string
+		initialMsg  string
+		modelOver   string
 		temperature float64
-		maxTokens  int
-		noStream   bool
-		persona    string
-		budget     int
-		reserve    int
+		maxTokens   int
+		noStream    bool
+		persona     string
+		budget      int
+		reserve     int
 	)
 	flag.StringVar(&initialMsg, "m", "", "首条消息 (发完后进入 REPL); 留空则只打印欢迎")
 	flag.StringVar(&modelOver, "model", "", "覆盖 AGENTLAB_MODEL_CHAT")

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,17 +10,18 @@ import (
 
 	"ai-learn-playground/agent-lab/internal/agent"
 	"ai-learn-playground/agent-lab/internal/llm"
+	"ai-learn-playground/agent-lab/internal/memory"
 )
 
 type chatPageData struct {
-	Title    string
-	Active   string
-	Profile  string
-	Model    string
-	BaseURL  string
-	System   string
-	Budget   int
-	Reserve  int
+	Title   string
+	Active  string
+	Profile string
+	Model   string
+	BaseURL string
+	System  string
+	Budget  int
+	Reserve int
 }
 
 func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
@@ -43,15 +45,16 @@ func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request) {
 // chatAPIRequest 是浏览器发来的一条聊天请求.
 // 支持: 新建消息 / 切换会话 / 编辑角色卡 / 重置 / 导出/导入历史.
 type chatAPIRequest struct {
-	Action       string             `json:"action"`        // "send" | "new" | "rename" | "delete" | "switch" | "set_system" | "reset" | "export" | "load"
-	ConvID       string             `json:"conversation_id"`
-	Title        string             `json:"title"`
-	System       string             `json:"system"`
-	Message      string             `json:"message"`
-	Messages     []chatHistoryEntry `json:"messages"`
-	Temp         float32            `json:"temperature"`
-	Max          int                `json:"max_tokens"`
-	Mode         string             `json:"mode"`           // "native" (default) | "react"
+	Action   string             `json:"action"` // "send" | "new" | "rename" | "delete" | "switch" | "set_system" | "reset" | "export" | "load"
+	ConvID   string             `json:"conversation_id"`
+	Title    string             `json:"title"`
+	System   string             `json:"system"`
+	SellerID string             `json:"seller_id"` // M4: 当前卖家, 决定长期记忆 namespace
+	Message  string             `json:"message"`
+	Messages []chatHistoryEntry `json:"messages"`
+	Temp     float32            `json:"temperature"`
+	Max      int                `json:"max_tokens"`
+	Mode     string             `json:"mode"` // "native" (default) | "react"
 }
 
 type chatHistoryEntry struct {
@@ -155,10 +158,11 @@ func (s *Server) handleChatSwitch(w http.ResponseWriter, req chatAPIRequest) {
 		entries = append(entries, chatHistoryEntry{Role: string(m.Role), Content: m.Content})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"id":       c.ID,
-		"title":    c.Title,
-		"system":   c.Memory.System(),
-		"messages": entries,
+		"id":        c.ID,
+		"title":     c.Title,
+		"seller_id": c.SellerID,
+		"system":    c.Memory.System(),
+		"messages":  entries,
 	})
 }
 
@@ -186,6 +190,7 @@ func (s *Server) handleChatSetSystem(w http.ResponseWriter, req chatAPIRequest) 
 	}
 	c.Memory.SetSystem(req.System)
 	s.convs.Touch(req.ConvID)
+	s.persistConv(c)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -197,6 +202,7 @@ func (s *Server) handleChatReset(w http.ResponseWriter, req chatAPIRequest) {
 	}
 	c.Memory.Reset()
 	s.convs.Touch(req.ConvID)
+	s.persistConv(c)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -236,6 +242,7 @@ func (s *Server) handleChatLoad(w http.ResponseWriter, req chatAPIRequest) {
 		c.Memory.Append(role, m.Content)
 	}
 	s.convs.Touch(req.ConvID)
+	s.persistConv(c)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "count": c.Memory.Len()})
 }
 
@@ -253,12 +260,14 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request, req chat
 	if conv == nil {
 		conv = s.convs.New(req.ConvID, "", s.defaultSystem, s.budget, s.reserve)
 	}
+	conv.SellerID = strings.TrimSpace(req.SellerID)
 	conv.Memory.Append(llm.RoleUser, req.Message)
 	info, cerr := conv.Memory.EnsureBudget(r.Context(), s.llm, s.cfg.ModelChat, req.Max)
 	if cerr != nil {
 		fmt.Printf("[chat] memory: %v\n", cerr)
 	}
 	s.convs.Touch(conv.ID)
+	s.persistConv(conv)
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -275,10 +284,12 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request, req chat
 
 	if info.DidCompress {
 		writeSSE(w, flusher, "summary", map[string]any{
-			"before_turns": info.BeforeTurns,
-			"after_turns":  info.AfterTurns,
-			"before_chars": info.BeforeChars,
-			"summary":      info.Summary,
+			"before_turns":  info.BeforeTurns,
+			"after_turns":   info.AfterTurns,
+			"before_chars":  info.BeforeChars,
+			"before_tokens": info.BeforeTokens,
+			"after_tokens":  info.AfterTokens,
+			"summary":       info.Summary,
 		})
 	}
 
@@ -294,6 +305,10 @@ func (s *Server) handleChatSend(w http.ResponseWriter, r *http.Request, req chat
 // handleChatSendNative 沿用现有的 ChatStream 增量流式路径.
 func (s *Server) handleChatSendNative(w http.ResponseWriter, r *http.Request, req chatAPIRequest, conv *Conversation, flusher http.Flusher) {
 	msgs := conv.Memory.Snapshot()
+	// 把卖家上下文注入 system, 让 agent 知道可以用 memory_get 读该卖家偏好.
+	if hint := sellerHint(conv.SellerID); hint != "" && len(msgs) > 0 && msgs[0].Role == llm.RoleSystem {
+		msgs[0].Content += hint
+	}
 	temp := req.Temp
 	if temp <= 0 {
 		temp = 0.4
@@ -350,6 +365,8 @@ func (s *Server) handleChatSendReact(w http.ResponseWriter, r *http.Request, req
 	if strings.TrimSpace(conv.Memory.System()) != "" {
 		systemPrompt = conv.Memory.System()
 	}
+	// 把卖家上下文注入 system, 让 ReAct agent 知道可以用 memory_get 读该卖家偏好.
+	systemPrompt += sellerHint(conv.SellerID)
 
 	temp := req.Temp
 	if temp <= 0 {
@@ -399,7 +416,28 @@ func (s *Server) finalizeChatSend(w http.ResponseWriter, conv *Conversation, req
 		}
 	}
 	s.convs.Touch(conv.ID)
-	writeSSE(w, flusher, "done", map[string]any{"conversation_id": conv.ID, "title": conv.Title})
+	s.persistConv(conv)
+	writeSSE(w, flusher, "done", map[string]any{"conversation_id": conv.ID, "title": conv.Title, "seller_id": conv.SellerID})
+}
+
+// persistConv 把会话快照写入 SQLite (无 store 时为 no-op).
+func (s *Server) persistConv(conv *Conversation) {
+	if s.convs == nil {
+		return
+	}
+	if err := s.convs.Persist(context.Background(), conv); err != nil {
+		fmt.Printf("[chat] persist %s: %v\n", conv.ID, err)
+	}
+}
+
+// sellerHint 生成注入 system prompt 的卖家上下文, 引导 agent 用 memory_get/put 管理该卖家偏好.
+func sellerHint(sellerID string) string {
+	sellerID = strings.TrimSpace(sellerID)
+	if sellerID == "" {
+		return ""
+	}
+	ns := memory.SellerNamespace(sellerID)
+	return fmt.Sprintf("\n\n当前卖家 ID: %s。写文案前可调用 memory_get(namespace=%q, key=\"tone\") 读取该卖家的历史口吻偏好; 若用户表达了新偏好, 用 memory_put(namespace=%q, key=\"tone\", value=<JSON>) 写回长期记忆。", sellerID, ns, ns)
 }
 
 func firstLine(s string) string {

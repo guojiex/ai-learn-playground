@@ -454,3 +454,53 @@ dl.kv dd code { font-family: var(--mono); }
 }
 .recent-item.err { border-left-color: var(--danger); }
 .recent-head { display: flex; justify-content: space-between; align-items: center; }
+
+/* ---------------- Memory 面板 (M4) ---------------- */
+.memory-page { display: flex; flex-direction: column; gap: 12px; }
+.memory-toolbar { display: flex; align-items: center; gap: 12px; }
+.memory-hint { font-size: 12px; line-height: 1.6; }
+.memory-hint code { font-family: var(--mono); background: var(--bg-elev); padding: 1px 5px; border-radius: 3px; }
+.mem-tree { display: flex; flex-direction: column; gap: 10px; }
+.mem-namespace {
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+}
+.mem-namespace > summary { cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.mem-ns-name { font-family: var(--mono); font-weight: 600; color: var(--accent); }
+.mem-entries { list-style: none; padding: 0; margin: 10px 0 0; display: flex; flex-direction: column; gap: 8px; }
+.mem-entry {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 8px 10px;
+  background: var(--bg);
+}
+.mem-entry-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.mem-key { font-family: var(--mono); font-weight: 600; }
+.mem-time { font-size: 11px; margin-left: auto; }
+.mem-forget { margin-left: 8px; padding: 2px 10px; font-size: 12px; }
+.mem-value {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--bg-elev);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 240px;
+  overflow: auto;
+}
+/* composer 里的 seller 输入框与其它选项一致 */
+.composer-options input[type="text"] {
+  width: 90px;
+  padding: 3px 8px;
+  font-size: 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+}

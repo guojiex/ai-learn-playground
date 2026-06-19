@@ -1,0 +1,42 @@
+// Package store 是 agent-lab 的单文件持久层 (SQLite).
+//
+// 设计目标 (M4):
+//   - 所有持久状态 (长期 KV / 会话 / 后续 trace / approval) 都进同一个 agent.db,
+//     便于备份与回放 (见 ADR-0005).
+//   - migration 幂等: 每次 Open 都重新执行 CREATE TABLE IF NOT EXISTS, 不维护版本号
+//     也能安全重复启动; 后续里程碑新增表时只需往 migrations 追加一条.
+//   - 驱动用 modernc.org/sqlite (纯 Go, 无 CGO), 与 "纯 Go" 哲学一致.
+package store
+
+// migrations 是按顺序执行的 schema 语句. 每条都必须幂等 (IF NOT EXISTS),
+// 这样 Open 重复调用不会报错, 也不需要单独的版本表.
+var migrations = []string{
+	`CREATE TABLE IF NOT EXISTS schema_meta (
+		key   TEXT PRIMARY KEY,
+		value TEXT NOT NULL
+	)`,
+	`CREATE TABLE IF NOT EXISTS memory_kv (
+		namespace  TEXT NOT NULL,
+		key        TEXT NOT NULL,
+		value      TEXT NOT NULL,
+		updated_at INTEGER NOT NULL,
+		PRIMARY KEY (namespace, key)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_memory_kv_namespace ON memory_kv(namespace)`,
+	`CREATE TABLE IF NOT EXISTS conversations (
+		id         TEXT PRIMARY KEY,
+		seller_id  TEXT NOT NULL DEFAULT '',
+		title      TEXT NOT NULL DEFAULT '',
+		system     TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_conversations_seller ON conversations(seller_id)`,
+	`CREATE TABLE IF NOT EXISTS conversation_messages (
+		conv_id TEXT NOT NULL,
+		idx     INTEGER NOT NULL,
+		role    TEXT NOT NULL,
+		content TEXT NOT NULL,
+		PRIMARY KEY (conv_id, idx)
+	)`,
+}

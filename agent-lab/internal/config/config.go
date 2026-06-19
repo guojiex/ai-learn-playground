@@ -25,6 +25,10 @@ type Config struct {
 	// ModelChat 是默认 chat 模型名, 来自 AGENTLAB_MODEL_CHAT.
 	ModelChat string
 
+	// DBPath 是 SQLite 持久层文件路径 (M4 起), 来自 AGENTLAB_DB_PATH.
+	// 默认 agent-lab/data/agent.db. 为 ":memory:" 时走纯内存库.
+	DBPath string
+
 	// HTTP 超时与重试.
 	RequestTimeout time.Duration
 	MaxRetries     int
@@ -37,6 +41,7 @@ func Load() (Config, error) {
 		BaseURL:        getenv("OPENAI_BASE_URL", ""),
 		APIKey:         getenv("OPENAI_API_KEY", "sk-local"),
 		ModelChat:      getenv("AGENTLAB_MODEL_CHAT", ""),
+		DBPath:         getenv("AGENTLAB_DB_PATH", "agent-lab/data/agent.db"),
 		RequestTimeout: getenvDuration("AGENTLAB_REQUEST_TIMEOUT", 120*time.Second),
 		MaxRetries:     getenvInt("AGENTLAB_MAX_RETRIES", 3),
 	}

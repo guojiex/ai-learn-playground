@@ -33,6 +33,9 @@
 
       <footer class="composer">
         <div class="composer-options">
+          <label class="muted" for="seller-id" title="卖家 ID, 决定长期记忆 namespace (seller:ID)">seller:</label>
+          <input id="seller-id" type="text" list="seller-list" placeholder="A001" autocomplete="off" />
+          <datalist id="seller-list"></datalist>
           <label class="muted" for="mode">agent 模式:</label>
           <select id="mode" title="选择 agent 模式">
             <option value="native">native (原生 function-calling)</option>

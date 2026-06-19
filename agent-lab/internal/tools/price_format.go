@@ -23,7 +23,7 @@ func (PriceFormat) Schema() llm.ToolSchema {
 		"price_format",
 		"把数字价格与配送/促销标签拼成台币标准展示串, 例如 'NT$690 · 現貨 · 限時免運'. 用于在写商品文案的促销行时格式化价格.",
 		map[string]any{
-			"type": "object",
+			"type":     "object",
 			"required": []string{"price_twd"},
 			"properties": map[string]any{
 				"price_twd": map[string]any{"type": "number", "description": "台币价格 (整数或小数)"},
