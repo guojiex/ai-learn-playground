@@ -21,7 +21,7 @@
 
     <section class="chat-main">
       <details class="persona" {{if .System}}open{{end}}>
-        <summary>角色卡 (system prompt) — 保存后下条消息生效</summary>
+        <summary>角色卡 (system prompt) — 保存后下条消息生效<span class="tip" data-tip="设定 Agent 的人设、语气和规则。保存后从下一条消息开始生效, 不影响已有消息。例如: '你是蝦皮台湾文案专家, 只用繁体中文回复'"></span></summary>
         <textarea id="system" rows="3">{{.System}}</textarea>
         <div class="persona-actions">
           <button id="save-system" type="button">保存</button>
@@ -33,17 +33,17 @@
 
       <footer class="composer">
         <div class="composer-options">
-          <label class="muted" for="seller-id" title="卖家 ID, 决定长期记忆 namespace (seller:ID)">seller:</label>
+          <label class="muted" for="seller-id">seller:<span class="tip" data-tip="卖家 ID, 决定长期记忆的命名空间 (seller:ID)。相同 ID 的会话共享长期记忆 (M4)。例如 A001"></span></label>
           <input id="seller-id" type="text" list="seller-list" placeholder="A001" autocomplete="off" />
           <datalist id="seller-list"></datalist>
-          <label class="muted" for="mode">agent 模式:</label>
-          <select id="mode" title="选择 agent 模式">
+          <label class="muted" for="mode">agent 模式:<span class="tip" data-tip="native: 用模型原生 function-calling 调工具 (需模型支持)。react: 用 Thought-Action-Observation JSON 文本解析调工具 (兼容性更好)"></span></label>
+          <select id="mode">
             <option value="native">native (原生 function-calling)</option>
             <option value="react">react (Thought-Action-Observation JSON)</option>
           </select>
-          <label class="muted" for="temperature" title="温度">temperature:</label>
+          <label class="muted" for="temperature">temperature:<span class="tip" data-tip="采样温度, 0=最确定 (适合工具调用), 1=较随机 (适合创意文案), 2=非常随机。默认 0.4"></span></label>
           <input id="temperature" type="number" min="0" max="2" step="0.1" value="0.4" />
-          <label class="muted" for="max-tokens" title="max_tokens">max_tokens:</label>
+          <label class="muted" for="max-tokens">max_tokens:<span class="tip" data-tip="模型单次回复的最大 token 数。512 约等于 300-400 个中文字。设太小会截断回复, 设太大会增加推理时间"></span></label>
           <input id="max-tokens" type="number" min="1" step="1" value="512" />
         </div>
         <textarea id="input" rows="2" placeholder="说点什么. Enter 发送, Shift+Enter 换行"></textarea>

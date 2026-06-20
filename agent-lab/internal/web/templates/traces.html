@@ -1,0 +1,27 @@
+{{define "content"}}
+  <header class="topbar">
+    <div class="topbar-title">
+      <h1>Traces</h1>
+      <span class="muted">M9 · 可观测性 (Trace/Span + LLM/Tool/Step 调用链)</span>
+    </div>
+    <div class="topbar-meta">
+      <span class="chip">profile <strong>{{.Profile}}</strong></span>
+      <span class="chip">model <strong>{{.Model}}</strong></span>
+    </div>
+  </header>
+
+  <section class="traces-page">
+    <div class="traces-list-panel">
+      <div class="traces-list-head">
+        <span>最近 Trace</span>
+        <button id="traces-refresh" type="button" class="btn-sm">刷新</button>
+      </div>
+      <div id="traces-list" class="traces-list-body"></div>
+    </div>
+    <div class="trace-detail-panel" id="trace-detail">
+      <p class="muted">选择一条 trace 查看详情.</p>
+    </div>
+  </section>
+
+  <script src="/static/traces.js" defer></script>
+{{end}}

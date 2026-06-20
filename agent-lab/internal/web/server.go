@@ -15,12 +15,14 @@ import (
 
 	"ai-learn-playground/agent-lab/internal/agent"
 	"ai-learn-playground/agent-lab/internal/config"
+	"ai-learn-playground/agent-lab/internal/hitl"
 	"ai-learn-playground/agent-lab/internal/llm"
 	"ai-learn-playground/agent-lab/internal/memory"
 	"ai-learn-playground/agent-lab/internal/prompt"
 	"ai-learn-playground/agent-lab/internal/rag"
 	"ai-learn-playground/agent-lab/internal/store"
 	"ai-learn-playground/agent-lab/internal/tools"
+	"ai-learn-playground/agent-lab/internal/trace"
 )
 
 // Server 是 web 模块的入口对象.
@@ -37,10 +39,16 @@ type Server struct {
 	retriever     *rag.Retriever
 	executor      *agent.Executor
 	planner       *agent.Planner
+	multiFactory  MultiAgentFactory
+	approvals     *hitl.Manager
+	recorder      *trace.Recorder
 	defaultSystem string
 	budget        int
 	reserve       int
 }
+
+// MultiAgentFactory 是创建 MultiAgent 的工厂函数 (每次 run 一个新实例).
+type MultiAgentFactory func(bus *agent.MessageBus) *agent.MultiAgent
 
 // ServerOption 用于自定义 NewServer 行为.
 type ServerOption func(*Server)
@@ -78,6 +86,27 @@ func WithPlannerExecutor(planner *agent.Planner, executor *agent.Executor) Serve
 	return func(s *Server) {
 		s.planner = planner
 		s.executor = executor
+	}
+}
+
+// WithMultiAgent 注入 MultiAgent 工厂, 启用 /multi 面板.
+func WithMultiAgent(factory MultiAgentFactory) ServerOption {
+	return func(s *Server) {
+		s.multiFactory = factory
+	}
+}
+
+// WithApprovals 注入 HITL 审批管理器, 启用 /approvals 面板.
+func WithApprovals(mgr *hitl.Manager) ServerOption {
+	return func(s *Server) {
+		s.approvals = mgr
+	}
+}
+
+// WithTracer 注入 trace recorder, 启用 /traces 面板.
+func WithTracer(rec *trace.Recorder) ServerOption {
+	return func(s *Server) {
+		s.recorder = rec
 	}
 }
 
@@ -158,6 +187,15 @@ func (s *Server) enabledNav() map[string]bool {
 	if s.executor != nil {
 		enabled["/plan"] = true
 	}
+	if s.multiFactory != nil {
+		enabled["/multi"] = true
+	}
+	if s.approvals != nil {
+		enabled["/approvals"] = true
+	}
+	if s.recorder != nil {
+		enabled["/traces"] = true
+	}
 	return enabled
 }
 
@@ -214,6 +252,24 @@ func (s *Server) Routes() http.Handler {
 		mux.HandleFunc("/api/plan/execute", s.handlePlanExecute)
 	}
 
+	// Multi-Agent 面板 (M7): 仅在注入 MultiAgent 工厂时启用.
+	if s.multiFactory != nil {
+		mux.HandleFunc("/multi", s.handleMultiPage)
+		mux.HandleFunc("/api/multi/run", s.handleMultiRun)
+	}
+
+	// Approvals 面板 (M8): 仅在注入审批管理器时启用.
+	if s.approvals != nil {
+		mux.HandleFunc("/approvals", s.handleApprovalsPage)
+		mux.HandleFunc("/api/approvals", s.handleApprovalsAPI)
+	}
+
+	// Traces 面板 (M9): 仅在注入 recorder 时启用.
+	if s.recorder != nil {
+		mux.HandleFunc("/traces", s.handleTracesPage)
+		mux.HandleFunc("/api/traces", s.handleTracesAPI)
+	}
+
 	// 教程页.
 	mux.HandleFunc("/tutorial", s.handleTutorial)
 
@@ -233,6 +289,15 @@ func (s *Server) Routes() http.Handler {
 		if p.Path == "/plan" && s.executor != nil {
 			continue
 		}
+		if p.Path == "/multi" && s.multiFactory != nil {
+			continue
+		}
+		if p.Path == "/approvals" && s.approvals != nil {
+			continue
+		}
+		if p.Path == "/traces" && s.recorder != nil {
+			continue
+		}
 		mux.HandleFunc(p.Path, func(w http.ResponseWriter, r *http.Request) {
 			s.renderPlaceholder(w, p)
 		})
@@ -246,7 +311,7 @@ func loadTemplates(enabled map[string]bool) (map[string]*template.Template, erro
 	funcs := template.FuncMap{
 		"navItems": func(active string) []NavItem { return navItems(active, enabled) },
 	}
-	pages := []string{"chat.html", "placeholder.html", "settings.html", "tools.html", "memory.html", "knowledge.html", "plan.html"}
+	pages := []string{"chat.html", "placeholder.html", "settings.html", "tools.html", "memory.html", "knowledge.html", "plan.html", "multi.html", "approvals.html", "traces.html"}
 	out := make(map[string]*template.Template, len(pages))
 	var err error
 	for _, p := range pages {

@@ -5,6 +5,253 @@
 
 ---
 
+## 2026-06-20 — M9 完成 (可观测性 + 评测: Trace/Span + LLM-as-Judge + 业务度量)
+
+里程碑: M9 — 给 agent 加统一 trace (所有 LLM/工具/step 调用可结构化查询), 建立三层评测让 "改了 prompt 比之前更好" 有数据支撑
+
+### 已实现
+
+**Trace/Span: internal/trace/trace.go (新包)**
+- `Trace` (一次 Run) + `Span` (一次 LLM/工具/agent step 调用), 含 kind (llm/tool/step/agent) / input/output / tokens_in/out / error / 耗时.
+- `Recorder`: `NewTrace` / `FinishTrace` / `StartSpan` / `EndSpan`, 持久化到 SQLite.
+- 通过 `context.Context` 透传 trace_id + parent span_id, 任意 milestone 的 agent 都能接入.
+- 查询: `ListTraces` (按时间倒序) / `GetTrace` (含全部 spans) / `ListSpans`.
+
+**Trace 持久化: internal/store/ (改)**
+- `migrations.go`: 新增 `traces` 表 (6 列) + `spans` 表 (13 列) + 2 个索引.
+
+**评测 Runner: internal/eval/runner.go (新包)**
+- `Case` (评测用例: prompt + platform + category) + `CaseResult` (输出 + judge 分 + 黑话命中率 + 合规 + token + 时延).
+- `Runner.Run(ctx, cases, suite, tag)`: 跑全部 cases → agent 输出 → judge 评分 → 业务度量 → 汇总 report.
+- `Report`: 均值 (judge 分 / 黑话 / 合规率 / token / 时延) + ok/fail 计数.
+- `LoadCases`: 从 JSONL 加载评测集.
+- `RenderMarkdown`: 渲染 markdown 表格报告.
+
+**LLM-as-Judge: internal/eval/judge.go (新)**
+- `Judge.Score(ctx, prompt, output) → (1-5分, 理由, error)`: 用 rubric 让 LLM 给输出打分.
+- rubric 可自定义 (默认 1-5 分细则), 解析失败重试 2 次.
+- 容错 JSON 解析 (裸 JSON / ```json fenced / brace pair), 复用 ReAct 提取模式.
+
+**业务度量: internal/eval/metrics.go (新)**
+- `SlangHit`: 台湾电商黑话命中率 (現貨/免運/CP值/下殺/限時...), 命中 5+ 满分.
+- `ComplianceOK`: 平台合规检查 (无违禁词: 最便宜/最低價/全網第一/保證治癒...).
+- `SlangHits` / `BannedHits`: 返回命中的具体词列表 (供 debug).
+
+**CLI: cmd/eval/main.go + cmd/trace/main.go (新)**
+- `eval -suite ecom-v1 -tag baseline`: 跑 6 条评测用例 → markdown 报告.
+- `trace list [--limit N]` / `trace show <id>` / `trace export <id> -o out.json`.
+
+**评测数据: data/eval/ (新)**
+- `prompts.jsonl`: 6 条评测用例 (蝦皮/momo/PChome/小红书 × 不同品类).
+- `judge_rubric.md`: 1-5 分评审 rubric.
+
+**Web UI: internal/web/**
+- `server.go`: 新增 `WithTracer` 选项 + `recorder` 字段; `/traces` + `/api/traces` 路由.
+- `handlers_traces.go` (新): `GET /traces` 页面; `GET /api/traces` (列表); `GET /api/traces?id=<id>` (单条 + spans).
+- `templates/traces.html` + `static/traces.js` (新): Traces 面板, 左侧 trace 列表 (状态颜色) + 右侧 span 时间线 (按 kind 颜色: llm 蓝/tool 绿/step 紫/agent 橙) + input/output 折叠.
+- `static/style.css`: trace 列表 + span 时间线 + kind 颜色.
+- `templates/layout.html`: footer 改 `M9 · trace + eval`.
+- `cmd/web/main.go`: 构造 `trace.Recorder` → `WithTracer`.
+
+**测试**
+- `internal/trace/trace_test.go`: Trace+Span 创建/查询/列表/持久化重开/context 透传/耗时计算.
+- `internal/eval/runner_test.go`: 黑话命中率/合规检查/Judge JSON 解析/Runner 完整流程/markdown 渲染.
+
+### 启动方式
+
+```bash
+# 终端 A: fake 后端
+go run ./agent-lab/scripts/fake-openai
+
+# 终端 B: web
+OPENAI_BASE_URL=http://127.0.0.1:18080/v1 OPENAI_API_KEY=sk-local AGENTLAB_PROFILE=L \
+  AGENTLAB_DB_PATH=agent-lab/data/agent.db \
+  go run ./agent-lab/cmd/web
+# 浏览器 http://127.0.0.1:8090/traces
+
+# 跑评测:
+OPENAI_BASE_URL=http://127.0.0.1:18080/v1 OPENAI_API_KEY=sk-local \
+  go run ./agent-lab/cmd/eval -suite ecom-v1 -tag baseline
+# → docs/reports/eval_2026-06-20_baseline.md
+
+# 查询 trace:
+AGENTLAB_DB_PATH=agent-lab/data/agent.db go run ./agent-lab/cmd/trace list
+AGENTLAB_DB_PATH=agent-lab/data/agent.db go run ./agent-lab/cmd/trace show <trace_id>
+```
+
+### 验收
+
+- [x] Trace/Span 结构化记录所有 LLM/工具/agent step 调用, 持久化到 SQLite
+- [x] 通过 context.Context 透传 trace_id, 任意 agent 可接入
+- [x] eval 报告包含: 业务度量 (黑话密度/合规率) + LLM-as-Judge 分数 + token/时延
+- [x] cmd/trace 支持按 trace_id 查询, 列表/show/export 三种模式
+- [x] Web Traces 面板: 列表 + span 时间线 + input/output 折叠
+- [x] 单测覆盖: trace CRUD + 持久化 + context 透传 + eval metrics + judge 解析 + runner 流程
+- [x] `go vet` / `go build` / `go test ./...` 全部通过
+
+### 衔接
+
+下一站候选:
+- M10 (Model Routing: 评测打底后上路由, "路由收益"可量化)
+- M11 (Capstone: 用 M9 直接验收)
+
+---
+
+## 2026-06-20 — M8 完成 (HITL: 人工审批 + RiskLevel + Approvals 面板)
+
+里程碑: M8 — 在 agent 执行高风险动作 (发布商品/改库存/改价) 前暂停, 把决策权交给人类
+
+### 已实现
+
+**RiskLevel 风险分级: internal/tools/tool.go (改)**
+- 新增 `RiskLevel` 类型: `low` (可逆查询) / `medium` (半可逆改价) / `high` (不可逆发布).
+- `RiskLeveler` 可选接口: 工具实现 `RiskLevel()` 返回自身风险等级, 未实现时默认 `low`.
+- `GetRiskLevel(t)`: 安全获取工具风险等级 (类型断言 + 默认值).
+
+**审批管理: internal/hitl/approval.go (新包)**
+- `Approval` 结构: ID / conv_id / step_idx / tool / args / payload (dry-run 摘要) / risk_level / status / reviewer / note / edited_args / 时间戳.
+- 状态机: `pending` → `approved` / `rejected` / `edited`.
+- `Manager`: `Create` / `Get` / `ListPending` / `ListAll` / `CountPending` / `Approve` / `Reject` / `Edit`.
+- `Edit` 模式: 人类修改参数后批准, agent 用 `edited_args` 继续执行 (而非原始 args).
+- 所有操作通过 `store.DB()` 直接操作 SQLite.
+
+**审批持久化: internal/store/ (改)**
+- `migrations.go`: 新增 `approvals` 表 (12 列) + status 索引 + conv_id 索引.
+- `sqlite.go`: 新增 `DB()` 访问器, 供 hitl 包直接执行 SQL.
+
+**CLI: cmd/hitl/main.go (新)**
+- `list [--all]` / `show <id>` / `approve <id> --note "ok"` / `reject <id> --note "原因"` / `edit <id> --args '{...}'`.
+- 表格输出: ID / STATUS / RISK / TOOL / CONV_ID / CREATED.
+
+**Web UI: internal/web/**
+- `server.go`: 新增 `WithApprovals` 选项 + `approvals` 字段; `/approvals` + `/api/approvals` 路由.
+- `handlers_approvals.go` (新): `GET /approvals` 页面; `GET /api/approvals` (pending 列表 + count); `POST /api/approvals` (approve/reject/edit).
+- `templates/approvals.html` + `static/approvals.js` (新): Approvals 面板, 待审批表格 (点击选中) + 详情卡片 (参数 JSON + dry-run payload) + 三按钮 (批准/拒绝/修改参数) + 编辑文本框.
+- `static/style.css`: 审批表格 + 风险徽标 (红/橙/绿) + 详情卡片 + 操作按钮.
+- `templates/layout.html`: footer 改 `M8 · hitl`.
+- `cmd/web/main.go`: 构造 `hitl.Manager` → `WithApprovals`.
+
+**测试**
+- `internal/hitl/approval_test.go`: Create+Get / Approve / Reject / Edit / ListPending+Count / 持久化重开 / 重复审批防护.
+
+### 启动方式
+
+```bash
+# 终端 A: fake 后端
+go run ./agent-lab/scripts/fake-openai
+
+# 终端 B: web
+OPENAI_BASE_URL=http://127.0.0.1:18080/v1 OPENAI_API_KEY=sk-local AGENTLAB_PROFILE=L \
+  go run ./agent-lab/cmd/web
+# 浏览器 http://127.0.0.1:8090
+#   /approvals  查看待审批 → 点击查看详情 → 批准/拒绝/修改参数
+
+# CLI 方式:
+AGENTLAB_DB_PATH=agent-lab/data/agent.db go run ./agent-lab/cmd/hitl list
+AGENTLAB_DB_PATH=agent-lab/data/agent.db go run ./agent-lab/cmd/hitl approve ap_001 --note "ok"
+```
+
+### 验收
+
+- [x] RiskLevel 三级 (low/medium/high), 工具可选实现 RiskLeveler
+- [x] 审批记录持久化到 SQLite (approvals 表), 支持重启后查看
+- [x] 支持三种决策: approve (直接放行) / reject (拒绝+原因) / edit (修改参数后放行)
+- [x] CLI + Web UI 双入口, Web UI 有风险徽标颜色区分
+- [x] 单测覆盖: 创建/查询/审批/拒绝/编辑/列表/持久化/重复防护
+- [x] `go vet` / `go build` / `go test ./...` 全部通过
+
+### 衔接
+
+下一站候选:
+- M9 (Trace + Eval: 系统化评测, 复用 M7 bus + M8 approvals 做 trace)
+- M10 (Batch: 复用 M6 Planner + M8 HITL 做批量发布)
+
+---
+
+## 2026-06-20 — M7 完成 (Multi-Agent: 4 角色协作 + 消息总线 + 循环防御)
+
+里程碑: M7 — 把 "一个 Agent 干所有事" 拆成 Researcher / Writer / Critic / Compliance 四角色, 用消息总线协调多轮协作
+
+### 已实现
+
+**消息总线: internal/agent/bus.go (新)**
+- `MessageBus`: 内存消息总线, 线程安全 (多 agent 并发写消息).
+- `Post(ctx, round, role, from, to, content, metadata)`: 发消息 + 可选持久化到 SQLite.
+- `Messages()` / `MessagesFor(agent)` / `MessagesByRound(round)` / `LastRound()` / `Count()`.
+- `NextRunID()`: 生成唯一 run ID (时间戳 + 原子计数器).
+
+**角色定义: internal/agent/roles.go (新)**
+- 4 个角色各有独立 system prompt + 工具子集 + 输出契约 (JSON):
+  - **Researcher**: 收集商品信息与卖点 → `{facts, competitors, summary}`, 工具: `product_lookup`, `kb_search`.
+  - **Writer**: 根据调研写文案 → `{title, body, tags}`, 无工具 (纯生成).
+  - **Critic**: 评审吸引力与完整性 → `{approve, issues}`, 工具: `slang_check`.
+  - **Compliance**: 合规检查 → `{approve, violations}`, 工具: `platform_lint`.
+- `RoleAgent.Step(ctx, input, useTools)`: 调 LLM (带工具时用 native Loop 驱动).
+- `ParseRoleJSON` / `IsApproved` / `GetIssues`: 容错解析角色 JSON 输出.
+
+**多 Agent 协调器: internal/agent/multi.go (新)**
+- `MultiAgent.Run(ctx, goal, events)`: 每轮 Researcher → Writer → Critic + Compliance 串行, 不通过时合并反馈给下一轮 Writer.
+- 终止条件:
+  1. Critic + Compliance 都 approve → status=ok.
+  2. 达到 maxRounds (默认 4) → status=max_rounds.
+  3. 循环防御: 连续 staleRounds 轮 draft 相似度 > threshold (默认 0.9, bigram Jaccard) → status=stale.
+- `MultiEvent` SSE 事件: round_start / agent_done (含 output/approved/issues/tokens) / round_end (含 feedback) / done / fail.
+- `MultiRunResult`: 完整执行结果 (run_id / rounds / status / final_draft / total_tokens / results[]).
+
+**消息持久化: internal/store/ (改)**
+- `migrations.go`: 新增 `agent_messages` 表 (run_id / round / role / from_agent / to_agent / content / metadata) + run_id 索引.
+- `sqlite.go`: `PutAgentMessage` / `LoadAgentMessages` (按 round 排序, 供回放).
+
+**CLI: cmd/multi/main.go (新)**
+- `-m "<目标>"` → 4 角色多轮协作 → 打印每轮每角色结果 → 最终文案 + 统计.
+- `-rounds N` 最大轮次; `-dump <file>` 结果 JSON.
+
+**Web UI: internal/web/**
+- `server.go`: 新增 `WithMultiAgent` 选项 (工厂函数, 每次 run 创建新 MultiAgent + 独立 bus) + `multiFactory` 字段; `/multi` + `/api/multi/run` 路由.
+- `handlers_multi.go` (新): `GET /multi` 页面; `POST /api/multi/run` (goal + max_rounds → SSE 流式推送 MultiEvent).
+- `templates/multi.html` + `static/multi.js` (新): Multi 面板, 4 列消息流 (Researcher/Writer/Critic/Compliance) + 轮次状态条 + 反馈区.
+- `static/style.css`: 4 列 grid 布局 + 角色卡片 (approve 绿/issues 橙/error 红) + 反馈区样式.
+- `templates/layout.html`: footer 改 `M7 · multi-agent`.
+- `cmd/web/main.go`: 构造 multiFactory → `WithMultiAgent`.
+
+**测试**
+- `internal/agent/bus_test.go`: 消息增删查 + 按 round/agent 过滤 + SQLite 持久化重开回放 + 无 store 内存模式.
+- `internal/agent/multi_test.go`: round 1 直接 approve / reject 后 round 2 approve / max_rounds 强制终止 / JSON 解析容错 / 相似度计算.
+
+### 启动方式
+
+```bash
+# 终端 A: fake 后端
+go run ./agent-lab/scripts/fake-openai
+
+# 终端 B: web
+OPENAI_BASE_URL=http://127.0.0.1:18080/v1 OPENAI_API_KEY=sk-local AGENTLAB_PROFILE=L \
+  go run ./agent-lab/cmd/web
+# 浏览器 http://127.0.0.1:8090/multi
+#   输入目标 → 开始协作 (4 列消息流实时刷新, 反馈区显示 Critic+Compliance → Writer 回环)
+
+# CLI 方式:
+OPENAI_BASE_URL=http://127.0.0.1:18080/v1 OPENAI_API_KEY=sk-local AGENTLAB_PROFILE=L \
+  go run ./agent-lab/cmd/multi -m "为 sku_001 写一篇蝦皮台湾文案" -rounds 3
+```
+
+### 验收
+
+- [x] 4 个角色独立可测, 每个都有自己的 system prompt + 工具子集 + 输出契约
+- [x] Message Bus 能持久化一轮的所有消息到 SQLite (agent_messages 表), 可回放
+- [x] 显式循环防御: 连续 staleRounds 轮 draft 相似度 > threshold 即强制终止 (bigram Jaccard)
+- [x] 单测覆盖: bus 持久化/多角色协作/approve 流程/max_rounds/循环防御/JSON 解析
+- [x] `go vet` / `go build` / `go test ./...` 全部通过
+- [x] Web 冒烟测试: /multi 页面 + /api/multi/run SSE 3 轮 × 4 角色完整推送
+
+### 衔接
+
+下一站候选:
+- M8 (HITL: 在 Critic / Compliance 不通过时把决策权交给人类)
+- M9 (Trace + Eval: 系统化评测多 agent 产出, 复用 bus 消息做 trace)
+
+---
+
 ## 2026-06-19 — M6 完成 (Planner-Executor: DAG 规划 + 分步执行 + 失败重规划)
 
 里程碑: M6 — 把 "走一步看一步" (ReAct) 升级为 "先整体规划, 再分步执行", 支持失败重规划

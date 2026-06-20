@@ -13,6 +13,7 @@
   <section class="plan-page">
     <div class="plan-input-box">
       <input id="plan-goal" type="text" placeholder="输入目标, 例如: 为 sku_001 在小红书台湾发一篇上新文案" autocomplete="off" />
+      <span class="tip" data-tip="输入要完成的目标, Planner 会用一次 LLM 调用把它拆解成 DAG (有向无环图) 计划, 包含若干有依赖关系的子任务"></span>
       <button id="plan-gen-btn" type="button">生成计划</button>
       <button id="plan-exec-btn" type="button" disabled>执行计划</button>
       <span id="plan-status" class="muted"></span>

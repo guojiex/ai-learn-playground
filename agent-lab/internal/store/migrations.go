@@ -49,4 +49,58 @@ var migrations = []string{
 		created_at  INTEGER NOT NULL
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source)`,
+	`CREATE TABLE IF NOT EXISTS agent_messages (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		run_id     TEXT NOT NULL,
+		round      INTEGER NOT NULL,
+		role       TEXT NOT NULL,
+		from_agent TEXT NOT NULL,
+		to_agent   TEXT NOT NULL,
+		content    TEXT NOT NULL,
+		metadata   TEXT NOT NULL DEFAULT '{}',
+		created_at INTEGER NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_agent_messages_run ON agent_messages(run_id)`,
+	`CREATE TABLE IF NOT EXISTS approvals (
+		id          TEXT PRIMARY KEY,
+		conv_id     TEXT NOT NULL,
+		step_idx    INTEGER NOT NULL DEFAULT 0,
+		tool        TEXT NOT NULL,
+		args        TEXT NOT NULL,
+		payload     TEXT NOT NULL DEFAULT '',
+		risk_level  TEXT NOT NULL DEFAULT 'low',
+		status      TEXT NOT NULL,
+		reviewer    TEXT NOT NULL DEFAULT '',
+		note        TEXT NOT NULL DEFAULT '',
+		edited_args TEXT NOT NULL DEFAULT '',
+		created_at  INTEGER NOT NULL,
+		reviewed_at INTEGER NOT NULL DEFAULT 0
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status)`,
+	`CREATE INDEX IF NOT EXISTS idx_approvals_conv ON approvals(conv_id)`,
+	`CREATE TABLE IF NOT EXISTS traces (
+		trace_id   TEXT PRIMARY KEY,
+		conv_id    TEXT NOT NULL DEFAULT '',
+		goal       TEXT NOT NULL DEFAULT '',
+		started_at INTEGER NOT NULL,
+		ended_at   INTEGER NOT NULL DEFAULT 0,
+		status     TEXT NOT NULL DEFAULT 'running'
+	)`,
+	`CREATE TABLE IF NOT EXISTS spans (
+		span_id    TEXT PRIMARY KEY,
+		trace_id   TEXT NOT NULL,
+		parent_id  TEXT NOT NULL DEFAULT '',
+		kind       TEXT NOT NULL,
+		name       TEXT NOT NULL,
+		started_at INTEGER NOT NULL,
+		ended_at   INTEGER NOT NULL DEFAULT 0,
+		attrs      TEXT NOT NULL DEFAULT '{}',
+		input      TEXT NOT NULL DEFAULT '',
+		output     TEXT NOT NULL DEFAULT '',
+		tokens_in  INTEGER NOT NULL DEFAULT 0,
+		tokens_out INTEGER NOT NULL DEFAULT 0,
+		error      TEXT NOT NULL DEFAULT ''
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_spans_trace ON spans(trace_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_traces_started ON traces(started_at)`,
 }

@@ -26,7 +26,7 @@
                 <pre><code class="schema-block">{{.Params}}</code></pre>
               </details>
               <details>
-                <summary>试调用 (DryRun)</summary>
+                <summary>试调用 (DryRun)<span class="tip" data-tip="在此输入工具的 JSON 参数 (参照上面的 JSON Schema), 点击 '调用' 执行。这是 DryRun 模式, 直接调用工具函数, 不经过 LLM"></span></summary>
                 <textarea class="tool-args" data-name="{{.Name}}" rows="3" placeholder="{{.Example}}"></textarea>
                 <div class="tool-actions">
                   <button class="invoke-btn" data-name="{{.Name}}" type="button">调用</button>

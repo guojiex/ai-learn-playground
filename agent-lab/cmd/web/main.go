@@ -24,11 +24,13 @@ import (
 
 	"ai-learn-playground/agent-lab/internal/agent"
 	"ai-learn-playground/agent-lab/internal/config"
+	"ai-learn-playground/agent-lab/internal/hitl"
 	"ai-learn-playground/agent-lab/internal/llm"
 	"ai-learn-playground/agent-lab/internal/memory"
 	"ai-learn-playground/agent-lab/internal/rag"
 	"ai-learn-playground/agent-lab/internal/store"
 	"ai-learn-playground/agent-lab/internal/tools"
+	"ai-learn-playground/agent-lab/internal/trace"
 	"ai-learn-playground/agent-lab/internal/web"
 )
 
@@ -109,6 +111,23 @@ func main() {
 	planner := agent.NewPlanner(client, reg, cfg.ModelChat)
 	executor := agent.NewExecutor(planner, client, reg, cfg.ModelChat)
 
+	// M7: Multi-Agent factory (每次 run 创建新实例, 绑定独立的 bus).
+	multiFactory := func(bus *agent.MessageBus) *agent.MultiAgent {
+		return agent.NewMultiAgent(client, reg, cfg.ModelChat, bus)
+	}
+
+	// M8: HITL 审批管理器.
+	var approvals *hitl.Manager
+	if st != nil {
+		approvals = hitl.NewManager(st)
+	}
+
+	// M9: Trace recorder.
+	var recorder *trace.Recorder
+	if st != nil {
+		recorder = trace.NewRecorder(st)
+	}
+
 	var srvOpts []web.ServerOption
 	srvOpts = append(srvOpts, web.WithToolRegistry(reg))
 	if st != nil {
@@ -121,6 +140,13 @@ func main() {
 		srvOpts = append(srvOpts, web.WithRetriever(retriever))
 	}
 	srvOpts = append(srvOpts, web.WithPlannerExecutor(planner, executor))
+	srvOpts = append(srvOpts, web.WithMultiAgent(multiFactory))
+	if approvals != nil {
+		srvOpts = append(srvOpts, web.WithApprovals(approvals))
+	}
+	if recorder != nil {
+		srvOpts = append(srvOpts, web.WithTracer(recorder))
+	}
 
 	srv, err := web.NewServer(cfg, client, srvOpts...)
 	if err != nil {

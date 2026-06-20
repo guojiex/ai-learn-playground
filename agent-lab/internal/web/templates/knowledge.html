@@ -16,6 +16,7 @@
 
     <div class="kb-search-box">
       <input id="kb-query" type="text" placeholder="搜索知识库, 例如: 蝦皮標題字數限制" autocomplete="off" />
+      <span class="tip" data-tip="输入查询文本, 系统会用 embedding 模型把它向量化, 然后在知识库中做余弦相似度 top-k 检索, 返回最相关的文档块"></span>
       <button id="kb-search-btn" type="button">检索</button>
       <span id="kb-search-status" class="muted"></span>
     </div>

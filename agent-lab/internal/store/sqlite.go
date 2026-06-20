@@ -72,6 +72,11 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// DB 返回底层 *sql.DB, 供其他包 (如 hitl) 直接执行自定义查询.
+func (s *Store) DB() *sql.DB {
+	return s.db
+}
+
 // ---------------- 长期 KV ----------------
 
 // KVEntry 是 memory_kv 的一行.
@@ -379,6 +384,54 @@ func (s *Store) ListDocSources(ctx context.Context) ([]DocSourceInfo, error) {
 			return nil, err
 		}
 		out = append(out, info)
+	}
+	return out, rows.Err()
+}
+
+// ---------------- Agent 消息持久化 (M7 Multi-Agent) ----------------
+
+// AgentMessageRow 是 agent_messages 表的一行.
+type AgentMessageRow struct {
+	ID        int64  `json:"id"`
+	RunID     string `json:"run_id"`
+	Round     int    `json:"round"`
+	Role      string `json:"role"`       // "system" | "user" | "assistant"
+	FromAgent string `json:"from_agent"` // "researcher" / "writer" / "critic" / "compliance" / "coordinator"
+	ToAgent   string `json:"to_agent"`
+	Content   string `json:"content"`
+	Metadata  string `json:"metadata"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+// PutAgentMessage 写入一条 agent 间消息.
+func (s *Store) PutAgentMessage(ctx context.Context, msg AgentMessageRow) (int64, error) {
+	now := time.Now().Unix()
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO agent_messages(run_id, round, role, from_agent, to_agent, content, metadata, created_at)
+		 VALUES(?,?,?,?,?,?,?,?)`,
+		msg.RunID, msg.Round, msg.Role, msg.FromAgent, msg.ToAgent, msg.Content, msg.Metadata, now)
+	if err != nil {
+		return 0, fmt.Errorf("put agent message: %w", err)
+	}
+	return res.LastInsertId()
+}
+
+// LoadAgentMessages 按 round 排序加载某次 run 的全部消息.
+func (s *Store) LoadAgentMessages(ctx context.Context, runID string) ([]AgentMessageRow, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, run_id, round, role, from_agent, to_agent, content, metadata, created_at
+		 FROM agent_messages WHERE run_id=? ORDER BY round, id`, runID)
+	if err != nil {
+		return nil, fmt.Errorf("load agent messages: %w", err)
+	}
+	defer rows.Close()
+	var out []AgentMessageRow
+	for rows.Next() {
+		var m AgentMessageRow
+		if err := rows.Scan(&m.ID, &m.RunID, &m.Round, &m.Role, &m.FromAgent, &m.ToAgent, &m.Content, &m.Metadata, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
 	}
 	return out, rows.Err()
 }

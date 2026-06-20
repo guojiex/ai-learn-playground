@@ -359,14 +359,22 @@
       <a href="#milestones">3. 里程碑</a>
       <a href="#m0">4. M0 · 最小骨架</a>
       <a href="#m1">5. M1 · 多轮对话</a>
-      <a href="#local">6. 本地大模型</a>
-      <a href="#next">7. 接下来</a>
+      <a href="#m2">6. M2 · Tool Calling</a>
+      <a href="#m3">7. M3 · ReAct</a>
+      <a href="#m4">8. M4 · 记忆</a>
+      <a href="#m5">9. M5 · RAG</a>
+      <a href="#m6">10. M6 · Planner</a>
+      <a href="#m7">11. M7 · Multi-Agent</a>
+      <a href="#m8">12. M8 · HITL</a>
+      <a href="#m9">13. M9 · Trace + Eval</a>
+      <a href="#local">14. 本地大模型</a>
+      <a href="#next">15. 接下来</a>
       <div class="section-label" style="margin-top:8px">外部</div>
       <a href="/chat">← Chat</a>
       <a href="/settings">Settings</a>
     </nav>
     <div class="tut-sidebar-footer">
-      M0 ✅ · M1 ✅<br/>profile: L
+      M0-M9 ✅ · M10-M11 待做<br/>profile: L
     </div>
   </aside>
 
@@ -518,14 +526,14 @@
 <p>每个里程碑都是一个<b>可以独立运行的小系统</b>. 完成一个就相当于学会一个概念.</p>
 <div class="milestone-row"><div class="ms-num">M0</div><div>最小骨架 · 单轮对话 + CLI + Web UI</div><span class="status-badge status-done">已完成</span></div>
 <div class="milestone-row"><div class="ms-num">M1</div><div>多轮对话 · persona + short-term memory + 滑窗摘要</div><span class="status-badge status-done">已完成</span></div>
-<div class="milestone-row"><div class="ms-num">M2</div><div>原生 Tool Calling · 查库存 / 查价</div><span class="status-badge status-pending">待开始</span></div>
-<div class="milestone-row"><div class="ms-num">M3</div><div>自写 ReAct · 手写"思考-工具-观察"协议</div><span class="status-badge status-pending">待开始</span></div>
-<div class="milestone-row"><div class="ms-num">M4</div><div>长期记忆 · SQLite + 向量索引</div><span class="status-badge status-pending">待开始</span></div>
-<div class="milestone-row"><div class="ms-num">M5</div><div>RAG · 商品资料喂给 Agent</div><span class="status-badge status-pending">待开始</span></div>
-<div class="milestone-row"><div class="ms-num">M6</div><div>Planner · 把用户需求拆成执行计划</div><span class="status-badge status-pending">待开始</span></div>
-<div class="milestone-row"><div class="ms-num">M7</div><div>Multi-Agent · Researcher / Writer / Critic</div><span class="status-badge status-pending">待开始</span></div>
-<div class="milestone-row"><div class="ms-num">M8</div><div>Human-in-the-Loop · 需人工审批的节点</div><span class="status-badge status-pending">待开始</span></div>
-<div class="milestone-row"><div class="ms-num">M9</div><div>可观测与评测 · Trace + 基准问答</div><span class="status-badge status-pending">待开始</span></div>
+<div class="milestone-row"><div class="ms-num">M2</div><div>原生 Tool Calling · 查库存 / 查价</div><span class="status-badge status-done">已完成</span></div>
+<div class="milestone-row"><div class="ms-num">M3</div><div>自写 ReAct · 手写"思考-工具-观察"协议</div><span class="status-badge status-done">已完成</span></div>
+<div class="milestone-row"><div class="ms-num">M4</div><div>长期记忆 · SQLite + 向量索引</div><span class="status-badge status-done">已完成</span></div>
+<div class="milestone-row"><div class="ms-num">M5</div><div>RAG · 商品资料喂给 Agent</div><span class="status-badge status-done">已完成</span></div>
+<div class="milestone-row"><div class="ms-num">M6</div><div>Planner · 把用户需求拆成执行计划</div><span class="status-badge status-done">已完成</span></div>
+<div class="milestone-row"><div class="ms-num">M7</div><div>Multi-Agent · Researcher / Writer / Critic</div><span class="status-badge status-done">已完成</span></div>
+<div class="milestone-row"><div class="ms-num">M8</div><div>Human-in-the-Loop · 需人工审批的节点</div><span class="status-badge status-done">已完成</span></div>
+<div class="milestone-row"><div class="ms-num">M9</div><div>可观测与评测 · Trace + 基准问答</div><span class="status-badge status-done">已完成</span></div>
 <div class="milestone-row"><div class="ms-num">M10</div><div>模型路由 · 小模型路由简单问题, 大模型处理复杂任务</div><span class="status-badge status-pending">待开始</span></div>
 <div class="milestone-row"><div class="ms-num">M11</div><div>综合 · 完整电商文案生成流水线</div><span class="status-badge status-pending">待开始</span></div>
 
@@ -593,7 +601,200 @@ go run ./agent-lab/cmd/web
   <li>底部按钮: <code class="inline">Reset / Export / Import</code></li>
 </ul>
 
-<h2 id="local">6. 本地大模型</h2>
+<h2 id="m2">6. M2 · 原生 Tool Calling</h2>
+<p>M2 让模型 <b>自己决定要不要调工具</b>. 利用 OpenAI 协议里的 <code class="inline">tools</code> + <code class="inline">tool_calls</code> 字段, 模型在合适的时候输出工具名和参数, 我们执行后把结果喂回去.</p>
+<div class="card">
+  <h3>关键文件</h3>
+  <ul>
+    <li><code class="inline">internal/tools/</code> — Tool 接口 + Registry: <code class="inline">product_lookup</code> (查商品), <code class="inline">price_format</code> (格式化价格), <code class="inline">platform_lint</code> (平台合规), <code class="inline">slang_check</code> (黑话检查)</li>
+    <li><code class="inline">internal/agent/native.go</code> — <code class="inline">Loop()</code>: LLM → tool_calls → 执行 → 喂回 → 再 LLM, 直到模型不再调工具</li>
+    <li><code class="inline">internal/web/handlers_tools.go</code> — /tools 面板: 试调用 (DryRun) 工具, 不经过 LLM</li>
+  </ul>
+</div>
+<pre>
+// Loop 的核心循环 (最多 MaxSteps 轮)
+for step := 0; step < maxSteps; step++ {
+    resp = client.Chat(ctx, req)           // 1. 问 LLM
+    if len(resp.ToolCalls) == 0 { break }   // 2. 没有工具调用 → 结束
+    for _, tc := range resp.ToolCalls {     // 3. 执行每个工具
+        out = registry.Get(tc.Name).Invoke(ctx, tc.Args)
+        messages = append(messages, toolResult(out))  // 4. 喂回结果
+    }
+}
+</pre>
+
+<h2 id="m3">7. M3 · 手写 ReAct</h2>
+<p>如果模型不支持 <code class="inline">tool_calls</code> (或你想理解原理), M3 手写 <b>Thought-Action-Observation</b> 文本协议. 模型输出 JSON <code class="inline">{"thought":"...","action":"tool_name","args":{...}}</code>, 我们解析后执行, 再把 <code class="inline">{"observation":"结果"}</code> 喂回去.</p>
+<div class="card">
+  <h3>关键文件</h3>
+  <ul>
+    <li><code class="inline">internal/agent/react.go</code> — <code class="inline">Loop()</code> ReAct 版本: system prompt 约定 JSON 格式, 解析容错 (裸 JSON / ```json / 大括号提取)</li>
+    <li><code class="inline">internal/agent/parse.go</code> — 容错 JSON 提取: <code class="inline">extractFenced</code> / <code class="inline">extractFirstBracePair</code></li>
+    <li>Chat 面板底部 <code class="inline">agent 模式</code> 下拉可切换 native / react</li>
+  </ul>
+</div>
+<p class="muted" style="font-size:13px">native vs react: native 靠模型原生能力 (更快更准), react 靠 prompt 工程 (兼容性更好, 但多一轮解析开销). 两者共享同一套工具.</p>
+
+<h2 id="m4">8. M4 · 记忆 (短期摘要 + 长期 KV)</h2>
+<p>M4 给 Agent 加 "记住卖家偏好" 的能力. 两层记忆:</p>
+<div class="card">
+  <h3>短期记忆 (M1 已有, M4 增强)</h3>
+  <p>滑窗 + 摘要: 上下文超预算时, 先滑窗丢最旧消息, 再不够就把旧消息摘要成一条. M4 把摘要也做成了 tool (<code class="inline">memory_summarize</code>).</p>
+</div>
+<div class="card">
+  <h3>长期记忆 (M4 新增)</h3>
+  <ul>
+    <li><code class="inline">internal/memory/kv.go</code> — <code class="inline">KV</code> 结构: namespace + key → value, 持久化到 SQLite</li>
+    <li>两个工具: <code class="inline">memory_put</code> (写入) / <code class="inline">memory_get</code> (读取)</li>
+    <li>namespace = <code class="inline">seller:ID</code>, 让不同卖家的记忆隔离</li>
+    <li>Chat 面板底部 <code class="inline">seller:</code> 输入框决定当前 namespace</li>
+  </ul>
+</div>
+<pre>
+# agent 自动写入的长期记忆示例 (SQLite kv_store 表)
+namespace=seller:A001, key=tone,       value="亲切活泼, 多用 emoji"
+namespace=seller:A001, key=keywords,   value=["現貨","免運","下殺"]
+namespace=seller:A001, key=audience,   value="小资女, 25-35岁"
+</pre>
+<p>/memory 面板可浏览全部长期记忆, 并 "遗忘" 单条.</p>
+
+<h2 id="m5">9. M5 · RAG (向量检索)</h2>
+<p>M5 让 Agent 能查 "知识库" — 平台规则文档、商品资料等. 不把文档塞进 prompt, 而是用 <b>embedding + 向量 top-k</b> 只检索相关片段.</p>
+<div class="card">
+  <h3>关键文件</h3>
+  <ul>
+    <li><code class="inline">internal/rag/</code> — Retriever: embedding → 余弦相似度 → top-k</li>
+    <li><code class="inline">internal/store/</code> — SQLite 存储 documents 表 (id / source / chunk / embedding BLOB)</li>
+    <li><code class="inline">internal/tools/kb_search.go</code> — <code class="inline">kb_search</code> 工具: Agent 自主决定何时检索</li>
+    <li><code class="inline">cmd/ingest/</code> — 把 .md 文档切块 + embedding 入库</li>
+  </ul>
+</div>
+<pre>
+# 导入平台规则到知识库
+go run ./agent-lab/cmd/ingest -dir agent-lab/data/platform_rules
+# → shopee_tw.md (2 chunks) + xiaohongshu.md (1 chunk) = 5 个文档块
+
+# Agent 调用 kb_search 工具
+{"query": "蝦皮標題字數限制", "k": 5}
+# → 返回最相关的 top-5 文档块
+</pre>
+<p>/knowledge 面板可手动检索测试, 查看命中片段与相似度分数.</p>
+
+<h2 id="m6">10. M6 · Planner-Executor (DAG 规划)</h2>
+<p>M6 把 "走一步看一步" (ReAct) 升级为 <b>"先整体规划, 再分步执行"</b>. 一次 LLM 调用把目标拆成 DAG (有向无环图), 然后按依赖拓扑排序并行执行.</p>
+<div class="card">
+  <h3>关键文件</h3>
+  <ul>
+    <li><code class="inline">internal/agent/planner.go</code> — <code class="inline">Planner.Plan()</code>: LLM → Plan JSON, 解析失败重试</li>
+    <li><code class="inline">internal/agent/executor.go</code> — <code class="inline">Executor.Execute()</code>: DAG 拓扑分层, 同层并行 (并发度 4), 失败 Replan</li>
+    <li><code class="inline">internal/agent/plan_types.go</code> — Plan / Task / TaskStatus / Kahn 环检测 / TopoLevels</li>
+    <li><code class="inline">cmd/plan/</code> — CLI: <code class="inline">-m "目标"</code> 生成 DAG → 执行 → dump JSON</li>
+  </ul>
+</div>
+<pre>
+# 典型 DAG: 调研 → 查商品 → 写文案 → 合规检查 → 组合输出
+t1: kb_search (无依赖)
+t2: product_lookup (无依赖)
+t3: agent:writer (depends: t1, t2)   ← 并行等 t1+t2 完成后执行
+t4: platform_lint (depends: t3)
+t5: agent:composer (depends: t3, t4) ← 最终输出
+
+# /plan 面板: 输入目标 → 生成计划 → 执行计划 (DAG 节点实时变色)
+</pre>
+<p class="muted" style="font-size:13px">上下文裁剪: 每个 agent 子任务只看自己依赖的输出 (<code class="inline">{t1.output}</code>), 不看全局历史, 避免 token 膨胀.</p>
+
+<h2 id="m7">11. M7 · Multi-Agent (4 角色协作)</h2>
+<p>M7 把 "一个 Agent 干所有事" 拆成 <b>4 个有明确边界的角色</b>, 用消息总线协调多轮协作.</p>
+<div class="card">
+  <h3>4 个角色</h3>
+  <ul>
+    <li><b>Researcher</b> (调研员): 收集商品信息与卖点 → <code class="inline">{facts, competitors, summary}</code></li>
+    <li><b>Writer</b> (撰稿人): 根据调研写文案 → <code class="inline">{title, body, tags}</code></li>
+    <li><b>Critic</b> (评审): 检查吸引力与完整性 → <code class="inline">{approve, issues}</code></li>
+    <li><b>Compliance</b> (合规): 检查平台规则 → <code class="inline">{approve, violations}</code></li>
+  </ul>
+</div>
+<div class="card">
+  <h3>关键文件</h3>
+  <ul>
+    <li><code class="inline">internal/agent/bus.go</code> — MessageBus: agent 间消息传递, 持久化到 SQLite</li>
+    <li><code class="inline">internal/agent/roles.go</code> — 4 个角色的 system prompt + 工具子集 + 输出契约</li>
+    <li><code class="inline">internal/agent/multi.go</code> — <code class="inline">MultiAgent.Run()</code>: 多轮协作 + 终止条件 + 循环防御</li>
+    <li><code class="inline">cmd/multi/</code> — CLI: <code class="inline">-m "目标"</code> 启动 4 角色协作</li>
+  </ul>
+</div>
+<pre>
+每轮流程:
+  Researcher → Writer → Critic + Compliance
+                                ↓
+                   都 approve → 完成 ✓
+                   不通过 → 合并 issues+violations → 反馈给下一轮 Writer ↻
+
+终止条件:
+  1. Critic + Compliance 都 approve → status=ok
+  2. 达到 maxRounds (默认 4) → status=max_rounds
+  3. 循环防御: 连续 2 轮 draft 相似度 > 90% → status=stale (无改进)
+</pre>
+<p>/multi 面板: 4 列消息流 (每列一个角色) + 轮次状态 + 反馈区. 每轮每角色的输出实时显示在对应列.</p>
+
+<h2 id="m8">12. M8 · Human-in-the-Loop (人工审批)</h2>
+<p>M8 在 Agent 执行高风险动作 (发布商品 / 改库存 / 改价) 前暂停, 把决策权交给人类.</p>
+<div class="card">
+  <h3>风险分级 (RiskLevel)</h3>
+  <ul>
+    <li><b>low</b> (绿): 可逆操作 (查询/生成文案), 无需审批</li>
+    <li><b>medium</b> (橙): 半可逆操作 (改价), 可选审批</li>
+    <li><b>high</b> (红): 不可逆操作 (发布), 强制审批</li>
+  </ul>
+  <p>工具可选实现 <code class="inline">RiskLeveler</code> 接口, 未实现时默认 low.</p>
+</div>
+<div class="card">
+  <h3>关键文件</h3>
+  <ul>
+    <li><code class="inline">internal/hitl/approval.go</code> — Approval + Manager: Create / Approve / Reject / Edit, 持久化到 SQLite</li>
+    <li><code class="inline">internal/tools/tool.go</code> — <code class="inline">RiskLevel</code> / <code class="inline">RiskLeveler</code> / <code class="inline">GetRiskLevel()</code></li>
+    <li><code class="inline">cmd/hitl/</code> — CLI: <code class="inline">list / show / approve / reject / edit</code></li>
+  </ul>
+</div>
+<pre>
+三种审批决策:
+  approve  → 直接放行, Agent 继续执行
+  reject   → 拒绝, 原因返回给上一步角色
+  edit     → 修改参数后放行, Agent 用 edited_args 继续执行
+</pre>
+<p>/approvals 面板: 待审批表格 (风险徽标颜色) → 点击查看详情 → 批准 / 拒绝 / 修改参数.</p>
+
+<h2 id="m9">13. M9 · 可观测性 + 评测</h2>
+<p>M9 给 Agent 加统一 trace (所有 LLM / 工具 / step 调用可结构化查询), 建立三层评测让 "改了 prompt 比之前更好" 有数据支撑.</p>
+<div class="card">
+  <h3>Trace / Span</h3>
+  <ul>
+    <li><code class="inline">internal/trace/trace.go</code> — Trace (一次 Run) + Span (一次调用), 通过 context.Context 透传</li>
+    <li>Span kind: llm / tool / step / agent, 含 input/output / tokens / error / 耗时</li>
+    <li>持久化到 SQLite (<code class="inline">traces</code> + <code class="inline">spans</code> 表)</li>
+    <li><code class="inline">cmd/trace/</code> — CLI: <code class="inline">list / show / export</code></li>
+  </ul>
+</div>
+<div class="card">
+  <h3>三层评测</h3>
+  <ul>
+    <li><b>LLM-as-Judge</b> (<code class="inline">internal/eval/judge.go</code>): 用 rubric 让 LLM 给输出打 1-5 分</li>
+    <li><b>业务度量</b> (<code class="inline">internal/eval/metrics.go</code>): 黑话命中率 (現貨/免運/CP值...) + 平台合规率 (违禁词检查)</li>
+    <li><b>Runner</b> (<code class="inline">internal/eval/runner.go</code>): 跑固定 prompts → agent 输出 → judge + metrics → markdown 报告</li>
+  </ul>
+</div>
+<pre>
+# 跑评测
+go run ./agent-lab/cmd/eval -suite ecom-v1 -tag baseline
+# → 6 条用例, 输出 markdown 报告 (Judge 均分 / 黑话命中率 / 合规率 / token / 时延)
+
+# 查 trace
+go run ./agent-lab/cmd/trace list
+go run ./agent-lab/cmd/trace show <trace_id>
+</pre>
+<p>/traces 面板: 左侧 trace 列表 (状态颜色) → 右侧 span 时间线 (llm 蓝 / tool 绿 / step 紫 / agent 橙), input/output 可折叠.</p>
+
+<h2 id="local">14. 本地大模型</h2>
 <p>agent-lab 不绑定任何云端 API。只要它在 <code>OPENAI_BASE_URL</code> 上暴露 Chat Completions 协议，就能接进来. 三种方式:</p>
 <table>
   <tr><th>方式</th><th>适用硬件</th><th>启动命令</th><th>对应的 BASE_URL</th></tr>
@@ -649,15 +850,15 @@ go run .\agent-lab\cmd\chat</pre>
   <li><b>XL</b>: qwen2.5-14b-instruct</li>
 </ul>
 
-<h2 id="next">7. 接下来要学什么</h2>
-<p>M2 到 M3 是理解"智能 Agent"的关键 — 让模型<b>自己决定要不要调用工具</b>. 两条路:</p>
+<h2 id="next">15. 接下来要学什么</h2>
+<p>M10 和 M11 是最后两个里程碑 — 把前面学的能力组装成完整系统:</p>
 <div class="card">
-  <h3>M2 · 原生 Tool Calling</h3>
-  <p>大多数现代模型 (Qwen2.5 / GPT 系列 / Claude) 都内置对 <code class="inline">tool_calls</code> 的支持. 给一段 JSON Schema, 模型会在合适的时候输出工具调用.</p>
+  <h3>M10 · 模型路由</h3>
+  <p>用 M9 的评测打底, 把简单问题路由给小模型 (省 token), 复杂任务路由给大模型 (保质量). "路由收益" 可量化: 对比路由前后的 Judge 均分与 token 成本.</p>
 </div>
 <div class="card">
-  <h3>M3 · 手写 ReAct</h3>
-  <p>如果你用的模型不支持 tool calling, 就手写"思考 → 行动 → 观察"的文本协议. 这是理解 LLM Agent 工作原理的最好练习.</p>
+  <h3>M11 · 毕业项目</h3>
+  <p>用 M6 Planner + M7 Multi-Agent + M8 HITL + M9 Eval 组装一条完整的电商文案生成流水线: 接需求 → 规划 → 多角色协作 → 人工审批 → 评测出报告.</p>
 </div>
 
 <p class="muted" style="margin-top: 40px; text-align: center;">— 持续更新中. 每完成一个里程碑, 这个页面会被刷新 —</p>

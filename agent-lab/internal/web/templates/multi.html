@@ -1,0 +1,51 @@
+{{define "content"}}
+  <header class="topbar">
+    <div class="topbar-title">
+      <h1>Multi-Agent</h1>
+      <span class="muted">M7 · 4 角色协作 (Researcher → Writer → Critic + Compliance)</span>
+    </div>
+    <div class="topbar-meta">
+      <span class="chip">profile <strong>{{.Profile}}</strong></span>
+      <span class="chip">model <strong>{{.Model}}</strong></span>
+    </div>
+  </header>
+
+  <section class="multi-page">
+    <div class="multi-input-box">
+      <input id="multi-goal" type="text" placeholder="输入目标, 例如: 为 sku_001 写一篇蝦皮台湾文案" autocomplete="off" />
+      <span class="tip" data-tip="输入协作目标, 4 个角色会多轮协作完成它: Researcher 调研 → Writer 撰稿 → Critic 评审 + Compliance 合规检查"></span>
+      <label class="muted">轮次:<span class="tip" data-tip="最大协作轮次。每轮 4 个角色各执行一次, 不通过则合并反馈给下一轮 Writer。达到上限后强制结束"></span></label>
+      <input id="multi-rounds" type="number" min="1" max="10" value="4" style="width:60px" />
+      <button id="multi-run-btn" type="button">开始协作</button>
+      <span id="multi-status" class="muted"></span>
+    </div>
+
+    <div id="multi-status-bar" class="multi-status-bar" style="display:none">
+      <span id="multi-round-info"></span>
+      <span id="multi-token-info"></span>
+    </div>
+
+    <div class="multi-columns">
+      <div class="multi-col" id="col-researcher">
+        <div class="multi-col-head">Researcher</div>
+        <div class="multi-col-body"></div>
+      </div>
+      <div class="multi-col" id="col-writer">
+        <div class="multi-col-head">Writer</div>
+        <div class="multi-col-body"></div>
+      </div>
+      <div class="multi-col" id="col-critic">
+        <div class="multi-col-head">Critic</div>
+        <div class="multi-col-body"></div>
+      </div>
+      <div class="multi-col" id="col-compliance">
+        <div class="multi-col-head">Compliance</div>
+        <div class="multi-col-body"></div>
+      </div>
+    </div>
+
+    <div id="multi-feedback" class="multi-feedback"></div>
+  </section>
+
+  <script src="/static/multi.js" defer></script>
+{{end}}

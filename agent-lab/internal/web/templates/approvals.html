@@ -1,0 +1,20 @@
+{{define "content"}}
+  <header class="topbar">
+    <div class="topbar-title">
+      <h1>Approvals</h1>
+      <span class="muted">M8 · Human-in-the-Loop 审批 (高风险动作暂停 → 人工决策 → resume)</span>
+    </div>
+    <div class="topbar-meta">
+      <span class="chip">profile <strong>{{.Profile}}</strong></span>
+      <span class="chip">model <strong>{{.Model}}</strong></span>
+    </div>
+  </header>
+
+  <section class="approvals-page">
+    <div class="approvals-summary" id="approvals-summary"></div>
+    <div class="approvals-list" id="approvals-list"></div>
+    <div class="approval-detail" id="approval-detail"></div>
+  </section>
+
+  <script src="/static/approvals.js" defer></script>
+{{end}}

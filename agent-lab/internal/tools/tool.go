@@ -28,6 +28,29 @@ type Tool interface {
 	Invoke(ctx context.Context, args json.RawMessage) (string, error)
 }
 
+// RiskLevel 表示工具的风险等级 (M8 HITL).
+type RiskLevel string
+
+const (
+	RiskLow    RiskLevel = "low"    // 可逆: 查询/生成文案, 无需审批
+	RiskMedium RiskLevel = "medium" // 半可逆: 修改配置/价格, 可选审批
+	RiskHigh   RiskLevel = "high"   // 不可逆: 发布/改库存, 强制审批
+)
+
+// RiskLeveler 是 Tool 可选实现的接口, 返回工具的风险等级.
+// 未实现时默认 RiskLow.
+type RiskLeveler interface {
+	RiskLevel() RiskLevel
+}
+
+// GetRiskLevel 安全地获取工具的风险等级, 未实现 RiskLeveler 时返回 RiskLow.
+func GetRiskLevel(t Tool) RiskLevel {
+	if r, ok := t.(RiskLeveler); ok {
+		return r.RiskLevel()
+	}
+	return RiskLow
+}
+
 // Registry 是一个并发安全的 Tool 注册表.
 type Registry struct {
 	mu    sync.RWMutex
