@@ -5,6 +5,40 @@
 
 ---
 
+## 2026-06-20 — M10+M11 完成 (模型路由 + 毕业项目) — 全部 11 个里程碑完成
+
+### M10 · 模型路由 (Model Routing)
+
+**已实现**
+- `internal/llm/registry.go`: ModelEntry (name/base_url/ctx/tags/est_tps) + Registry (ByTag/ByName/LoadRegistry/DefaultRegistry).
+- `internal/llm/policy.go`: RouteMatch (task/ctx_tokens_gt) + RouteRule (use/fallback) + Policy.Evaluate → RouteResult.
+- `internal/llm/router.go`: Router.ChatForTask (路由 → 调用 → 失败降级), RouteRecord 历史, RecentRoutes.
+- `config/models.json`: 3 模型注册表 (3B fast / 7B default / 14B reason) + 8 条路由规则.
+- `cmd/route/main.go`: CLI 演示 (–task title/plan/body –huge-context).
+- Web UI: /router 面板 (注册表表格 + 路由规则 + 最近调用记录).
+- 测试: router_test.go (ByTag/ByName/Evaluate 各场景/fallback 成功/全失败).
+
+### M11 · Capstone (毕业项目)
+
+**已实现**
+- `internal/capstone/pipeline.go`: Pipeline.Run (多平台 Multi-Agent 协作 → 评测 → 汇总), PipelineResult + EvalSummary.
+- `internal/capstone/persona.go`: DefaultPersona + StylePersona (girlfriend/promo/pro/gift) + PlatformName.
+- `internal/capstone/outputs.go`: PlatformOutput + ParseOutput (JSON/文本容错) + FormatMarkdown.
+- `cmd/capstone/main.go`: 一条命令完成完整流水线 (–seller –sku-id –platforms –style).
+- Web UI: /capstone 面板 (参数表单 + 一键生成 + 评测卡片 + 多平台输出).
+- RenderReport: 自动生成 markdown 报告 (goal/plan/评测分数/token成本).
+
+### 验收
+- [x] M10: 路由器与 LLMClient 解耦, 调用方只传 task 标签, 路由内部决定打到哪
+- [x] M10: 失败降级 (fallback chain) 在 RouteRecord 中清晰可见
+- [x] M10: S 档 (单模型) 与 L 档 (3 模型) 配置都能跑通
+- [x] M11: 一条命令跑完整流程, 输出多平台版本 + 评测分数
+- [x] M11: 自动生成 markdown 报告 (goal / plan / 评测 / token)
+- [x] 全部 `go vet` / `go build` / `go test ./...` 通过
+- [x] 全部 11 个里程碑 (M0-M11) 完成
+
+---
+
 ## 2026-06-20 — M9 完成 (可观测性 + 评测: Trace/Span + LLM-as-Judge + 业务度量)
 
 里程碑: M9 — 给 agent 加统一 trace (所有 LLM/工具/step 调用可结构化查询), 建立三层评测让 "改了 prompt 比之前更好" 有数据支撑

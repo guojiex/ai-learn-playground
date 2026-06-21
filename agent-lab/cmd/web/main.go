@@ -128,6 +128,10 @@ func main() {
 		recorder = trace.NewRecorder(st)
 	}
 
+	// M10: 模型路由器.
+	routerReg := llm.DefaultRegistry(cfg.BaseURL, cfg.Profile)
+	router := llm.NewRouter(routerReg, llm.DefaultPolicy(), client)
+
 	var srvOpts []web.ServerOption
 	srvOpts = append(srvOpts, web.WithToolRegistry(reg))
 	if st != nil {
@@ -147,6 +151,7 @@ func main() {
 	if recorder != nil {
 		srvOpts = append(srvOpts, web.WithTracer(recorder))
 	}
+	srvOpts = append(srvOpts, web.WithRouter(router))
 
 	srv, err := web.NewServer(cfg, client, srvOpts...)
 	if err != nil {

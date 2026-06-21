@@ -42,6 +42,7 @@ type Server struct {
 	multiFactory  MultiAgentFactory
 	approvals     *hitl.Manager
 	recorder      *trace.Recorder
+	router        *llm.Router
 	defaultSystem string
 	budget        int
 	reserve       int
@@ -107,6 +108,13 @@ func WithApprovals(mgr *hitl.Manager) ServerOption {
 func WithTracer(rec *trace.Recorder) ServerOption {
 	return func(s *Server) {
 		s.recorder = rec
+	}
+}
+
+// WithRouter 注入模型路由器, 启用 /router 面板.
+func WithRouter(r *llm.Router) ServerOption {
+	return func(s *Server) {
+		s.router = r
 	}
 }
 
@@ -196,6 +204,10 @@ func (s *Server) enabledNav() map[string]bool {
 	if s.recorder != nil {
 		enabled["/traces"] = true
 	}
+	if s.router != nil {
+		enabled["/router"] = true
+	}
+	enabled["/capstone"] = true
 	return enabled
 }
 
@@ -270,6 +282,16 @@ func (s *Server) Routes() http.Handler {
 		mux.HandleFunc("/api/traces", s.handleTracesAPI)
 	}
 
+	// Router 面板 (M10): 仅在注入路由器时启用.
+	if s.router != nil {
+		mux.HandleFunc("/router", s.handleRouterPage)
+		mux.HandleFunc("/api/router", s.handleRouterAPI)
+	}
+
+	// Capstone 面板 (M11): 始终启用.
+	mux.HandleFunc("/capstone", s.handleCapstonePage)
+	mux.HandleFunc("/api/capstone/run", s.handleCapstoneRun)
+
 	// 教程页.
 	mux.HandleFunc("/tutorial", s.handleTutorial)
 
@@ -298,6 +320,9 @@ func (s *Server) Routes() http.Handler {
 		if p.Path == "/traces" && s.recorder != nil {
 			continue
 		}
+		if p.Path == "/router" && s.router != nil {
+			continue
+		}
 		mux.HandleFunc(p.Path, func(w http.ResponseWriter, r *http.Request) {
 			s.renderPlaceholder(w, p)
 		})
@@ -311,7 +336,7 @@ func loadTemplates(enabled map[string]bool) (map[string]*template.Template, erro
 	funcs := template.FuncMap{
 		"navItems": func(active string) []NavItem { return navItems(active, enabled) },
 	}
-	pages := []string{"chat.html", "placeholder.html", "settings.html", "tools.html", "memory.html", "knowledge.html", "plan.html", "multi.html", "approvals.html", "traces.html"}
+	pages := []string{"chat.html", "placeholder.html", "settings.html", "tools.html", "memory.html", "knowledge.html", "plan.html", "multi.html", "approvals.html", "traces.html", "router.html", "capstone.html"}
 	out := make(map[string]*template.Template, len(pages))
 	var err error
 	for _, p := range pages {

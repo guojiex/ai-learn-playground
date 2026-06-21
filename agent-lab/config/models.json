@@ -1,0 +1,36 @@
+{
+  "profile": "L",
+  "models": [
+    {
+      "name": "qwen2.5-3b-instruct",
+      "base_url": "http://127.0.0.1:18080/v1",
+      "ctx": 8192,
+      "tags": ["fast", "title", "tag"],
+      "est_tps": 80
+    },
+    {
+      "name": "qwen2.5-7b-instruct",
+      "base_url": "http://127.0.0.1:18080/v1",
+      "ctx": 8192,
+      "tags": ["default", "body", "critic"],
+      "est_tps": 45
+    },
+    {
+      "name": "qwen2.5-14b-instruct",
+      "base_url": "http://127.0.0.1:18080/v1",
+      "ctx": 8192,
+      "tags": ["reason", "planner"],
+      "est_tps": 25
+    }
+  ],
+  "routes": [
+    { "match": { "task": "title" }, "use": "fast", "fallback": ["default"] },
+    { "match": { "task": "tag" }, "use": "fast", "fallback": ["default"] },
+    { "match": { "task": "plan" }, "use": "reason", "fallback": ["default"] },
+    { "match": { "task": "planner" }, "use": "reason", "fallback": ["default"] },
+    { "match": { "task": "body" }, "use": "default" },
+    { "match": { "task": "critic" }, "use": "default" },
+    { "match": { "task": "compliance" }, "use": "fast", "fallback": ["default"] },
+    { "match": { "ctx_tokens_gt": 6000 }, "use": "default" }
+  ]
+}

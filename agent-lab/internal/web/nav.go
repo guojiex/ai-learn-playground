@@ -23,6 +23,7 @@ func navItems(active string, enabled map[string]bool) []NavItem {
 		{Path: "/approvals", Label: "Approvals", Icon: "approve", Disabled: true},
 		{Path: "/traces", Label: "Traces", Icon: "trace", Disabled: true},
 		{Path: "/router", Label: "Router", Icon: "route", Disabled: true},
+		{Path: "/capstone", Label: "Capstone", Icon: "capstone"},
 		{Path: "/settings", Label: "Settings", Icon: "gear"},
 		{Path: "/tutorial", Label: "Tutorial", Icon: "book"},
 	}

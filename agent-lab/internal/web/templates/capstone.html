@@ -1,0 +1,47 @@
+{{define "content"}}
+  <header class="topbar">
+    <div class="topbar-title">
+      <h1>Capstone</h1>
+      <span class="muted">M11 · 毕业项目 (Multi-Agent + Eval 一键流水线)</span>
+    </div>
+    <div class="topbar-meta">
+      <span class="chip">profile <strong>{{.Profile}}</strong></span>
+      <span class="chip">model <strong>{{.Model}}</strong></span>
+    </div>
+  </header>
+
+  <section class="capstone-page">
+    <div class="capstone-params">
+      <div class="capstone-param">
+        <label>卖家 ID<span class="tip" data-tip="卖家 ID, 决定长期记忆 namespace (seller:ID)"></span></label>
+        <input id="cs-seller" type="text" value="A001" />
+      </div>
+      <div class="capstone-param">
+        <label>商品 SKU<span class="tip" data-tip="商品 SKU, 用于 product_lookup 查询商品信息"></span></label>
+        <input id="cs-sku" type="text" value="sku_001" />
+      </div>
+      <div class="capstone-param">
+        <label>目标平台<span class="tip" data-tip="逗号分隔, 支持 shopee / momo / pchome / xhs"></span></label>
+        <input id="cs-platforms" type="text" value="shopee,xhs" />
+      </div>
+      <div class="capstone-param">
+        <label>风格<span class="tip" data-tip="girlfriend=闺蜜种草 / promo=促销紧迫 / pro=专业规格 / gift=送礼场景"></span></label>
+        <select id="cs-style">
+          <option value="girlfriend">girlfriend (闺蜜种草)</option>
+          <option value="promo">promo (促销紧迫)</option>
+          <option value="pro">pro (专业规格)</option>
+          <option value="gift">gift (送礼场景)</option>
+        </select>
+      </div>
+    </div>
+    <div class="capstone-run">
+      <button id="cs-run-btn" type="button">一键生成</button>
+      <span id="cs-status" class="muted"></span>
+    </div>
+
+    <div id="cs-eval" class="capstone-eval" style="display:none"></div>
+    <div id="cs-output" class="capstone-output"></div>
+  </section>
+
+  <script src="/static/capstone.js" defer></script>
+{{end}}

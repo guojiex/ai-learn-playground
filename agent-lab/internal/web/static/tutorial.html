@@ -367,14 +367,16 @@
       <a href="#m7">11. M7 · Multi-Agent</a>
       <a href="#m8">12. M8 · HITL</a>
       <a href="#m9">13. M9 · Trace + Eval</a>
-      <a href="#local">14. 本地大模型</a>
-      <a href="#next">15. 接下来</a>
+      <a href="#m10">14. M10 · 模型路由</a>
+      <a href="#m11">15. M11 · Capstone</a>
+      <a href="#local">16. 本地大模型</a>
+      <a href="#next">17. 接下来</a>
       <div class="section-label" style="margin-top:8px">外部</div>
       <a href="/chat">← Chat</a>
       <a href="/settings">Settings</a>
     </nav>
     <div class="tut-sidebar-footer">
-      M0-M9 ✅ · M10-M11 待做<br/>profile: L
+      M0-M11 全部完成 ✅<br/>profile: L
     </div>
   </aside>
 
@@ -534,8 +536,8 @@
 <div class="milestone-row"><div class="ms-num">M7</div><div>Multi-Agent · Researcher / Writer / Critic</div><span class="status-badge status-done">已完成</span></div>
 <div class="milestone-row"><div class="ms-num">M8</div><div>Human-in-the-Loop · 需人工审批的节点</div><span class="status-badge status-done">已完成</span></div>
 <div class="milestone-row"><div class="ms-num">M9</div><div>可观测与评测 · Trace + 基准问答</div><span class="status-badge status-done">已完成</span></div>
-<div class="milestone-row"><div class="ms-num">M10</div><div>模型路由 · 小模型路由简单问题, 大模型处理复杂任务</div><span class="status-badge status-pending">待开始</span></div>
-<div class="milestone-row"><div class="ms-num">M11</div><div>综合 · 完整电商文案生成流水线</div><span class="status-badge status-pending">待开始</span></div>
+<div class="milestone-row"><div class="ms-num">M10</div><div>模型路由 · 小模型路由简单问题, 大模型处理复杂任务</div><span class="status-badge status-done">已完成</span></div>
+<div class="milestone-row"><div class="ms-num">M11</div><div>综合 · 完整电商文案生成流水线</div><span class="status-badge status-done">已完成</span></div>
 
 <h2 id="m0">4. M0 · 最小骨架</h2>
 <p>M0 要做的事非常简单: 发一条消息给 LLM, 流式收到回复. 关键是把 <b>可运行的骨架</b> 搭好.</p>
@@ -794,7 +796,57 @@ go run ./agent-lab/cmd/trace show <trace_id>
 </pre>
 <p>/traces 面板: 左侧 trace 列表 (状态颜色) → 右侧 span 时间线 (llm 蓝 / tool 绿 / step 紫 / agent 橙), input/output 可折叠.</p>
 
-<h2 id="local">14. 本地大模型</h2>
+<h2 id="m10">14. M10 · 模型路由</h2>
+<p>M10 让 Agent 根据任务标签和上下文长度自动选择模型, 简单问题用小模型 (省时延), 复杂任务用大模型 (保质量), 失败时降级.</p>
+<div class="card">
+  <h3>关键文件</h3>
+  <ul>
+    <li><code class="inline">internal/llm/registry.go</code> — ModelEntry + Registry: 模型注册表 (name / base_url / ctx / tags / est_tps)</li>
+    <li><code class="inline">internal/llm/policy.go</code> — RouteRule + Policy: 路由规则 (task 标签 / ctx 超限 / fallback 降级链)</li>
+    <li><code class="inline">internal/llm/router.go</code> — Router: ChatForTask (路由 → 调用 → 失败降级), RouteRecord 历史</li>
+    <li><code class="inline">config/models.json</code> — 3 模型注册表 (3B fast / 7B default / 14B reason) + 8 条路由规则</li>
+    <li><code class="inline">cmd/route/</code> — CLI: <code class="inline">--task title/plan/body</code> 演示路由</li>
+  </ul>
+</div>
+<pre>
+# 路由规则示例
+task=title     → tag:fast   → qwen2.5-3b-instruct   (fallback: 7b)
+task=plan      → tag:reason → qwen2.5-14b-instruct  (fallback: 7b)
+ctx_tokens>6000 → tag:default → qwen2.5-7b-instruct
+
+# 调用方只传 task 标签, 路由内部决定打到哪
+router.ChatForTask(ctx, "title", req)  // → 3b, 失败则 fallback 到 7b
+</pre>
+<p>/router 面板: 模型注册表表格 + 路由规则 + 最近调用记录 (命中模型 / 降级链 / 时延 / 成功状态).</p>
+
+<h2 id="m11">15. M11 · Capstone (毕业项目)</h2>
+<p>M11 把 M0-M10 的能力组合成完整电商文案 Agent: 一条命令完成多平台文案生成 + 评测.</p>
+<div class="card">
+  <h3>关键文件</h3>
+  <ul>
+    <li><code class="inline">internal/capstone/pipeline.go</code> — Pipeline.Run: 多平台 Multi-Agent 协作 (M7) → 评测 (M9) → 汇总</li>
+    <li><code class="inline">internal/capstone/persona.go</code> — DefaultPersona + StylePersona (girlfriend/promo/pro/gift)</li>
+    <li><code class="inline">internal/capstone/outputs.go</code> — PlatformOutput + ParseOutput + FormatMarkdown</li>
+    <li><code class="inline">cmd/capstone/</code> — CLI: <code class="inline">--seller --sku-id --platforms --style</code> 一键生成</li>
+  </ul>
+</div>
+<pre>
+# 一条命令跑完整流程
+go run ./agent-lab/cmd/capstone \
+  --seller A001 --sku-id sku_001 \
+  --platforms shopee,xhs --style girlfriend
+
+# 输出: 多平台文案 + 评测分数 + markdown 报告
+--- 蝦皮台湾 ---
+标题: 今治毛巾 現貨免運...
+--- 小红书台湾 ---
+#今治毛巾 / 蓬鬆吸水...
+
+[eval] judge=4.4/5  slang=78%  compliance=100%
+</pre>
+<p>/capstone 面板: 参数表单 (seller/sku/platforms/style) + 一键生成 + 评测卡片 (Judge 均分 / 黑话命中 / 合规率 / 轮次 / token) + 多平台输出区.</p>
+
+<h2 id="local">16. 本地大模型</h2>
 <p>agent-lab 不绑定任何云端 API。只要它在 <code>OPENAI_BASE_URL</code> 上暴露 Chat Completions 协议，就能接进来. 三种方式:</p>
 <table>
   <tr><th>方式</th><th>适用硬件</th><th>启动命令</th><th>对应的 BASE_URL</th></tr>
@@ -850,18 +902,22 @@ go run .\agent-lab\cmd\chat</pre>
   <li><b>XL</b>: qwen2.5-14b-instruct</li>
 </ul>
 
-<h2 id="next">15. 接下来要学什么</h2>
-<p>M10 和 M11 是最后两个里程碑 — 把前面学的能力组装成完整系统:</p>
+<h2 id="next">17. 终点不是终点</h2>
+<p>全部 11 个里程碑已完成! 你已经 "从零手写" 了一个具备 planner、multi-agent、memory、RAG、HITL、trace、eval、router 的本地 agent 系统. 下一步可选方向:</p>
 <div class="card">
-  <h3>M10 · 模型路由</h3>
-  <p>用 M9 的评测打底, 把简单问题路由给小模型 (省 token), 复杂任务路由给大模型 (保质量). "路由收益" 可量化: 对比路由前后的 Judge 均分与 token 成本.</p>
+  <h3>框架对比</h3>
+  <p>用 LangGraph / OpenAI Agents SDK 实现等价系统, 量化生产力差异.</p>
 </div>
 <div class="card">
-  <h3>M11 · 毕业项目</h3>
-  <p>用 M6 Planner + M7 Multi-Agent + M8 HITL + M9 Eval 组装一条完整的电商文案生成流水线: 接需求 → 规划 → 多角色协作 → 人工审批 → 评测出报告.</p>
+  <h3>训练联动</h3>
+  <p>用 Capstone 跑出的高质量样本反哺 LoRA, 再把 LoRA 模型作为 specialist 注入 M10 路由.</p>
+</div>
+<div class="card">
+  <h3>工程化</h3>
+  <p>HTTP/gRPC 服务 + 鉴权 + 多租户 + 速率限制, 做出最小可演示的产品形态.</p>
 </div>
 
-<p class="muted" style="margin-top: 40px; text-align: center;">— 持续更新中. 每完成一个里程碑, 这个页面会被刷新 —</p>
+<p class="muted" style="margin-top: 40px; text-align: center;">— 全部 11 个里程碑已完成. Happy hacking! —</p>
 
   </main>
 </div><!-- tut-body -->

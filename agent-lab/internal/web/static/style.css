@@ -729,3 +729,30 @@ dl.kv dd code { font-family: var(--mono); }
 .span-io summary { cursor: pointer; color: var(--muted); }
 .span-io pre { margin: 4px 0; font-size: 10px; white-space: pre-wrap; word-break: break-word; background: var(--bg); padding: 6px; border-radius: 4px; border: 1px solid var(--line); max-height: 150px; overflow: auto; }
 .span-error { padding: 2px 8px 2px 24px; font-size: 10px; color: #dc3545; }
+
+/* ---------------- Router 面板 (M10) ---------------- */
+.router-page { display: flex; flex-direction: column; gap: 18px; }
+.router-section h2 { font-size: 15px; margin: 0 0 8px; }
+.router-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.router-table th { text-align: left; padding: 6px 10px; background: var(--bg-elev); border-bottom: 2px solid var(--line); }
+.router-table td { padding: 6px 10px; border-bottom: 1px solid var(--line); }
+.router-table code { font-family: var(--mono); font-size: 11px; background: var(--bg); padding: 1px 4px; border-radius: 3px; }
+
+/* ---------------- Capstone 面板 (M11) ---------------- */
+.capstone-page { display: flex; flex-direction: column; gap: 14px; }
+.capstone-params { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; background: var(--bg-elev); padding: 14px; border-radius: var(--radius); border: 1px solid var(--line); }
+.capstone-param { display: flex; flex-direction: column; gap: 4px; }
+.capstone-param label { font-size: 11px; color: var(--muted); font-weight: 700; }
+.capstone-param input, .capstone-param select { padding: 6px 10px; font-size: 13px; border: 1px solid var(--line); border-radius: 4px; background: var(--bg); color: var(--fg); }
+.capstone-run { display: flex; gap: 10px; align-items: center; }
+.capstone-run button { padding: 8px 24px; font-size: 14px; cursor: pointer; border: none; border-radius: var(--radius); background: var(--accent); color: white; }
+.capstone-run button:disabled { opacity: 0.4; cursor: wait; }
+.capstone-output { display: flex; flex-direction: column; gap: 10px; }
+.capstone-platform { border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; background: var(--bg-elev); }
+.capstone-platform-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.capstone-platform-head h3 { margin: 0; font-size: 14px; }
+.capstone-platform-body { font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; }
+.capstone-eval { display: flex; gap: 16px; flex-wrap: wrap; }
+.capstone-eval-card { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 16px; background: var(--bg-elev); min-width: 100px; text-align: center; }
+.capstone-eval-card .val { font-size: 22px; font-weight: 700; color: var(--accent); }
+.capstone-eval-card .lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; }

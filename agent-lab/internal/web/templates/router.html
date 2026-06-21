@@ -1,0 +1,29 @@
+{{define "content"}}
+  <header class="topbar">
+    <div class="topbar-title">
+      <h1>Router</h1>
+      <span class="muted">M10 · 模型路由 (标签 + 上下文 + 失败降级)</span>
+    </div>
+    <div class="topbar-meta">
+      <span class="chip">profile <strong>{{.Profile}}</strong></span>
+      <span class="chip">model <strong>{{.Model}}</strong></span>
+    </div>
+  </header>
+
+  <section class="router-page">
+    <div class="router-section">
+      <h2>模型注册表</h2>
+      <div id="router-registry"></div>
+    </div>
+    <div class="router-section">
+      <h2>路由规则</h2>
+      <div id="router-policy"></div>
+    </div>
+    <div class="router-section">
+      <h2>最近调用 <button id="router-refresh" type="button" class="btn-sm">刷新</button></h2>
+      <div id="router-recent"></div>
+    </div>
+  </section>
+
+  <script src="/static/router.js" defer></script>
+{{end}}
