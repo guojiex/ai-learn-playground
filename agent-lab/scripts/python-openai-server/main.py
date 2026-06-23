@@ -94,7 +94,7 @@ def build_prompt(tokenizer, messages):
 
 
 def resolve_model_id(requested):
-    configured = os.environ.get("PY_OPENAI_MODEL", "Qwen/Qwen1.5-1.8B-Chat")
+    configured = os.environ.get("PY_OPENAI_MODEL", "Qwen/Qwen2.5-3B-Instruct")
     aliases = {
         "qwen1.5-1.8b-chat": "Qwen/Qwen1.5-1.8B-Chat",
         "qwen2.5-3b-instruct": "Qwen/Qwen2.5-3B-Instruct",
@@ -175,7 +175,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path in {"/", "/healthz", "/v1/models"}:
-            configured_model = os.environ.get("PY_OPENAI_MODEL", "Qwen/Qwen1.5-1.8B-Chat")
+            configured_model = os.environ.get("PY_OPENAI_MODEL", "Qwen/Qwen2.5-3B-Instruct")
             loaded_model = MODEL_ID or ""
             device = DEVICE or os.environ.get("PY_OPENAI_DEVICE", "auto")
             if self.path == "/v1/models":
@@ -246,7 +246,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default=os.environ.get("PY_OPENAI_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("PY_OPENAI_PORT", "18080")))
-    parser.add_argument("--model", default=os.environ.get("PY_OPENAI_MODEL", "Qwen/Qwen1.5-1.8B-Chat"))
+    parser.add_argument("--model", default=os.environ.get("PY_OPENAI_MODEL", "Qwen/Qwen2.5-3B-Instruct"))
     parser.add_argument("--device", default=os.environ.get("PY_OPENAI_DEVICE", "auto"), choices=["auto", "cuda", "mps", "cpu"])
     parser.add_argument("--lazy", action="store_true", default=os.environ.get("PY_OPENAI_LAZY", "0") == "1")
     args = parser.parse_args()

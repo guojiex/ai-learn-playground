@@ -25,7 +25,7 @@ param(
     [string]$ApiKey  = "sk-local",
     [string]$Profile = "L",
     [string]$WebAddr = "127.0.0.1:8090",
-    [string]$PyModel = "Qwen/Qwen1.5-1.8B-Chat",
+    [string]$PyModel = "Qwen/Qwen2.5-3B-Instruct",
     [ValidateSet("auto","cuda","mps","cpu")]
     [string]$PyDevice = "auto",
     [switch]$Lazy,
@@ -263,7 +263,7 @@ try {
         "local-web" {
             $Profile = "S"
             Set-AgentEnv
-            $env:AGENTLAB_MODEL_CHAT = "qwen1.5-1.8b-chat"
+            $env:AGENTLAB_MODEL_CHAT = "qwen2.5-3b-instruct"
             $pyStdout = Join-Path $env:TEMP "agent-lab-py-openai.out.log"
             $pyStderr = Join-Path $env:TEMP "agent-lab-py-openai.err.log"
             $webStdout = Join-Path $env:TEMP "agent-lab-web.out.log"
@@ -314,7 +314,7 @@ try {
         }
         "py-chat" {
             Set-AgentEnv
-            $env:AGENTLAB_MODEL_CHAT = "qwen1.5-1.8b-chat"
+            $env:AGENTLAB_MODEL_CHAT = "qwen2.5-3b-instruct"
             $stdout = Join-Path $env:TEMP "agent-lab-py-openai.out.log"
             $stderr = Join-Path $env:TEMP "agent-lab-py-openai.err.log"
             Write-Host "[py-chat] starting python OpenAI server on $BaseUrl ..." -ForegroundColor Cyan
@@ -334,7 +334,7 @@ try {
         }
         "py-web" {
             Set-AgentEnv
-            $env:AGENTLAB_MODEL_CHAT = "qwen1.5-1.8b-chat"
+            $env:AGENTLAB_MODEL_CHAT = "qwen2.5-3b-instruct"
             $pyStdout = Join-Path $env:TEMP "agent-lab-py-openai.out.log"
             $pyStderr = Join-Path $env:TEMP "agent-lab-py-openai.err.log"
             $webStdout = Join-Path $env:TEMP "agent-lab-web.out.log"

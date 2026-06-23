@@ -28,7 +28,7 @@ http://127.0.0.1:8090/
 默认模型：
 
 ```text
-Qwen/Qwen1.5-1.8B-Chat
+Qwen/Qwen2.5-3B-Instruct
 ```
 
 依赖文件位于：
