@@ -18,7 +18,7 @@
 
 ## 最短上手路径
 
-1. 按 [docs/04-local-model-stack.md](docs/04-local-model-stack.md) 起一个本地 OpenAI 兼容 server (llama.cpp 或 Ollama)。
+1. 按 [docs/04-local-model-stack.md](docs/04-local-model-stack.md) 起一个本地 OpenAI 兼容 server。可选后端包括 llama.cpp、Ollama，或本仓库提供的 Python `transformers` 服务。
 2. 进入 [docs/milestones/m0-skeleton.md](docs/milestones/m0-skeleton.md)，跑通 `cmd/chat`。
 3. 按 [docs/01-roadmap.md](docs/01-roadmap.md) 顺序往下推。
 
@@ -58,7 +58,47 @@ go run ./agent-lab/cmd/chat -m "你好"
 go run ./agent-lab/cmd/chat -m "再说一次" -no-stream
 ```
 
-换到真实本地模型时把 `OPENAI_BASE_URL` 指向 `llama-server` / `ollama` 即可，详见 [docs/04-local-model-stack.md](docs/04-local-model-stack.md)。
+换到真实本地模型时把 `OPENAI_BASE_URL` 指向 `llama-server` / `ollama` 即可，详见 [docs/04-local-model-stack.md](docs/04-local-model-stack.md)。也可以用下面的 Python 本地模型服务。
+
+## Python 本地模型服务
+
+如果不想先装 llama.cpp / Ollama，可以用本仓库提供的 Python OpenAI 兼容服务。它复用 `lora/` 的 `transformers` 本地加载思路，对外暴露 `/v1/chat/completions`，因此 `agent-lab` 的 Go 代码无需修改。
+
+先准备 Python 推理依赖：
+
+```powershell
+python -m pip install torch transformers accelerate
+```
+
+启动服务：
+
+```powershell
+.\agent-lab\tools\run.ps1 py-openai
+```
+
+默认加载 `Qwen/Qwen1.5-1.8B-Chat`，监听 `http://127.0.0.1:18080/v1`。如果只想先验证 HTTP 服务能启动、不立即加载模型，可以用 lazy 模式：
+
+```powershell
+.\agent-lab\tools\run.ps1 py-openai -Lazy
+```
+
+指定模型或设备：
+
+```powershell
+.\agent-lab\tools\run.ps1 py-openai -PyModel "Qwen/Qwen1.5-1.8B-Chat" -PyDevice cuda
+```
+
+另开一个终端连接该服务：
+
+```powershell
+$env:OPENAI_BASE_URL="http://127.0.0.1:18080/v1"
+$env:OPENAI_API_KEY="sk-local"
+$env:AGENTLAB_PROFILE="S"
+$env:AGENTLAB_MODEL_CHAT="qwen1.5-1.8b-chat"
+go run .\agent-lab\cmd\chat -m "你好"
+```
+
+服务入口在 `scripts/python-openai-server/main.py`，支持 `GET /healthz`、`GET /v1/models`、`POST /v1/chat/completions`，包含非流式与 SSE 流式响应。当前 Python 服务主要用于 M0/M1/M3 的本地对话体验；后续完整 tool calling 仍建议优先用 llama.cpp / Ollama 这类成熟 OpenAI 兼容后端。
 
 ## M0 Web UI 体验
 

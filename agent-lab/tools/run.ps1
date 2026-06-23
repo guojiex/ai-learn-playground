@@ -2,6 +2,7 @@
 #
 # Usage from repo root:
 #   .\agent-lab\tools\run.ps1 fake
+#   .\agent-lab\tools\run.ps1 py-openai
 #   .\agent-lab\tools\run.ps1 web
 #   .\agent-lab\tools\run.ps1 demo-web
 #   .\agent-lab\tools\run.ps1 chat -Msg "hello"
@@ -11,14 +12,18 @@
 
 param(
     [Parameter(Position=0)]
-    [ValidateSet("chat","chat-once","fake","web","demo","demo-web","build","test","vet","fmt","help")]
+    [ValidateSet("chat","chat-once","fake","py-openai","web","demo","demo-web","build","test","vet","fmt","help")]
     [string]$Cmd = "help",
 
     [string]$Msg     = "hello, please introduce yourself in one sentence",
     [string]$BaseUrl = "http://127.0.0.1:18080/v1",
     [string]$ApiKey  = "sk-local",
     [string]$Profile = "L",
-    [string]$WebAddr = "127.0.0.1:8090"
+    [string]$WebAddr = "127.0.0.1:8090",
+    [string]$PyModel = "Qwen/Qwen1.5-1.8B-Chat",
+    [ValidateSet("auto","cuda","mps","cpu")]
+    [string]$PyDevice = "auto",
+    [switch]$Lazy
 )
 
 $ErrorActionPreference = "Stop"
@@ -59,6 +64,12 @@ try {
         "vet"       { go vet   ./agent-lab/... }
         "fmt"       { gofmt -w (Join-Path $AgentLab ".") }
         "fake"      { go run ./agent-lab/scripts/fake-openai }
+        "py-openai" {
+            $script = Join-Path $AgentLab "scripts\python-openai-server\main.py"
+            $args = @($script, "--model", $PyModel, "--device", $PyDevice)
+            if ($Lazy) { $args += "--lazy" }
+            python @args
+        }
         "web" {
             Set-AgentEnv
             go run ./agent-lab/cmd/web -addr $WebAddr
