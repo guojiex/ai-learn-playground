@@ -153,6 +153,28 @@ function Get-BaseHealthURL {
     return "$u/healthz"
 }
 
+function Stop-ListeningPort($Port, $Label) {
+    $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+    foreach ($conn in $conns) {
+        $pidToStop = $conn.OwningProcess
+        if ($pidToStop -and $pidToStop -ne $PID) {
+            $proc = Get-Process -Id $pidToStop -ErrorAction SilentlyContinue
+            if ($proc) {
+                Write-Host "[local-web] stopping stale $Label on port $Port (pid=$pidToStop, process=$($proc.ProcessName))" -ForegroundColor Yellow
+                Stop-Process -Id $pidToStop -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+
+function Get-PortFromAddr($Addr) {
+    if ($Addr -match "^https?://") {
+        return ([Uri]$Addr).Port
+    }
+    $parts = $Addr.Split(":")
+    return [int]$parts[$parts.Length - 1]
+}
+
 try {
     switch ($Cmd) {
         "help"      { Show-Help }
@@ -176,6 +198,9 @@ try {
             $pyStderr = Join-Path $env:TEMP "agent-lab-py-openai.err.log"
             $webStdout = Join-Path $env:TEMP "agent-lab-web.out.log"
             $webStderr = Join-Path $env:TEMP "agent-lab-web.err.log"
+            Stop-ListeningPort -Port (Get-PortFromAddr $WebAddr) -Label "web UI"
+            Stop-ListeningPort -Port (Get-PortFromAddr $BaseUrl) -Label "model server"
+            Start-Sleep -Milliseconds 300
             Write-Host "[local-web] starting local model and web UI ..." -ForegroundColor Cyan
             $py = Start-PythonOpenAI -Stdout $pyStdout -Stderr $pyStderr -ForceLazy
             try {
