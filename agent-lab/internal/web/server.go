@@ -237,6 +237,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/chat", s.handleChatPage)
 	mux.HandleFunc("/api/chat", s.handleChatAPI)
 	mux.HandleFunc("/api/conversations", s.handleConversationsAPI)
+	mux.HandleFunc("/api/runtime", s.handleRuntimeAPI)
 
 	// Tools 面板 (M2): 仅在注入 Registry 时启用.
 	if s.tools != nil {

@@ -35,8 +35,12 @@ type chatReq struct {
 	Stream   bool             `json:"stream"`
 }
 
+const fakeModelID = "fake-openai/tw-ecom-simulator"
+
 func main() {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", handleHealth)
+	mux.HandleFunc("/v1/models", handleModels)
 	mux.HandleFunc("/v1/chat/completions", handleChat)
 	mux.HandleFunc("/v1/embeddings", handleEmbed)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -51,6 +55,33 @@ func main() {
 	}
 }
 
+func handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":               true,
+		"service":          "fake-openai",
+		"configured_model": fakeModelID,
+		"loaded_model":     fakeModelID,
+		"device":           "none",
+	})
+}
+
+func handleModels(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"object":           "list",
+		"service":          "fake-openai",
+		"configured_model": fakeModelID,
+		"loaded_model":     fakeModelID,
+		"device":           "none",
+		"data": []map[string]any{{
+			"id":       fakeModelID,
+			"object":   "model",
+			"owned_by": "agent-lab",
+		}},
+	})
+}
+
 func handleChat(w http.ResponseWriter, r *http.Request) {
 	var req chatReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -60,12 +91,12 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 	reply := generateReply(req.Messages)
 
 	if req.Stream {
-		streamReply(w, req.Model, reply)
+		streamReply(w, fakeModelID, reply)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"model": req.Model,
+		"model": fakeModelID,
 		"choices": []map[string]any{{
 			"index":         0,
 			"message":       map[string]any{"role": "assistant", "content": reply},

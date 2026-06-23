@@ -19,6 +19,30 @@
   const $maxTk    = document.getElementById("max-tokens");
   const $seller   = document.getElementById("seller-id");
   const $sellerList = document.getElementById("seller-list");
+  const $backendModel = document.getElementById("backend-model");
+
+  async function loadRuntime() {
+    if (!$backendModel) return;
+    try {
+      const r = await fetch("/api/runtime", { cache: "no-store" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const data = await r.json();
+      if (!data.backend_ok) {
+        $backendModel.textContent = "未连接";
+        $backendModel.title = data.error || "后端不可用";
+        return;
+      }
+      const parts = [];
+      if (data.backend_service) parts.push(data.backend_service);
+      if (data.backend_model) parts.push(data.backend_model);
+      if (data.device) parts.push("device=" + data.device);
+      $backendModel.textContent = parts.join(" · ") || "未知";
+      $backendModel.title = "Base URL: " + (data.base_url || "") + "\n请求模型: " + (data.request_model || "") + "\n配置模型: " + (data.configured_model || "") + "\n已加载模型: " + (data.loaded_model || "");
+    } catch (e) {
+      $backendModel.textContent = "检测失败";
+      $backendModel.title = e.message;
+    }
+  }
 
   // 当前会话 ID, 初次为 "" (将在首次发送时由服务端生成).
   let currentConv = "";
@@ -483,6 +507,7 @@
     }
   });
 
-  // 初始加载会话列表
+  // 初始加载运行时信息和会话列表
+  loadRuntime();
   loadConversations();
 })();

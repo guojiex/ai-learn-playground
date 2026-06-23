@@ -3,7 +3,7 @@
 # Usage from repo root:
 #   .\agent-lab\tools\run.ps1 fake
 #   .\agent-lab\tools\run.ps1 local-web
-#   .\agent-lab\tools\run.ps1 local-web -VerbosePip
+#   .\agent-lab\tools\run.ps1 local-web -QuietPip
 #   .\agent-lab\tools\run.ps1 py-openai
 #   .\agent-lab\tools\run.ps1 py-chat -Msg "hello"
 #   .\agent-lab\tools\run.ps1 py-web
@@ -29,7 +29,8 @@ param(
     [string]$PyDevice = "auto",
     [switch]$Lazy,
     [switch]$SkipPyInstall,
-    [switch]$VerbosePip
+    [switch]$QuietPip,
+    [string]$TorchIndex = "https://download.pytorch.org/whl/cu128"
 )
 
 $ErrorActionPreference = "Stop"
@@ -71,7 +72,7 @@ function Invoke-PipInstall($PythonExe, $Arguments, $LogPath, $Label) {
     Write-Host "[python-env] $Label ..." -ForegroundColor Cyan
     Write-Host "[python-env] log: $LogPath" -ForegroundColor DarkGray
     $argList = @("-m", "pip") + $Arguments + @("--progress-bar", "on")
-    if ($VerbosePip) { $argList += "--verbose" }
+    if (-not $QuietPip) { $argList += "--verbose" }
     $logWriteFailed = $false
     & $PythonExe @argList 2>&1 | ForEach-Object {
         $line = $_.ToString()
@@ -94,6 +95,15 @@ function Invoke-PipInstall($PythonExe, $Arguments, $LogPath, $Label) {
     Write-Host "[python-env] $Label done" -ForegroundColor Green
 }
 
+function Test-TorchCUDA($PythonExe) {
+    try {
+        $out = & $PythonExe -c "import torch; print(torch.cuda.is_available()); print(torch.version.cuda or '')" 2>$null
+        return (($out | Select-Object -First 1) -eq "True")
+    } catch {
+        return $false
+    }
+}
+
 function Ensure-PythonEnv {
     $venv = Join-Path $AgentLab ".venv"
     $pythonExe = Get-PythonExe
@@ -105,11 +115,14 @@ function Ensure-PythonEnv {
         python -m venv $venv
     }
     if (-not $SkipPyInstall) {
-        $reqHash = (Get-FileHash $requirements -Algorithm SHA256).Hash
+        $reqHash = ((Get-FileHash $requirements -Algorithm SHA256).Hash + "|torch-index=" + $TorchIndex)
         $oldHash = if (Test-Path $stamp) { Get-Content $stamp -Raw } else { "" }
         if ($reqHash -ne $oldHash.Trim()) {
             if (Test-Path $pipLog) { Remove-Item $pipLog -Force }
             Invoke-PipInstall -PythonExe $pythonExe -Arguments @("install", "--upgrade", "pip") -LogPath $pipLog -Label "upgrading pip in virtual environment"
+            $torchArgs = @("install", "--index-url", $TorchIndex, "torch")
+            if (-not (Test-TorchCUDA $pythonExe)) { $torchArgs = @("install", "--force-reinstall", "--index-url", $TorchIndex, "torch") }
+            Invoke-PipInstall -PythonExe $pythonExe -Arguments $torchArgs -LogPath $pipLog -Label "installing CUDA torch into virtual environment"
             Invoke-PipInstall -PythonExe $pythonExe -Arguments @("install", "-r", $requirements) -LogPath $pipLog -Label "installing dependencies into virtual environment"
             Set-Content -Path $stamp -Value $reqHash
         }
@@ -117,11 +130,11 @@ function Ensure-PythonEnv {
     return $pythonExe
 }
 
-function Start-PythonOpenAI($Stdout, $Stderr) {
+function Start-PythonOpenAI($Stdout, $Stderr, [switch]$ForceLazy) {
     $pythonExe = Ensure-PythonEnv
     $script = Join-Path $AgentLab "scripts\python-openai-server\main.py"
     $args = @($script, "--model", $PyModel, "--device", $PyDevice)
-    if ($Lazy) { $args += "--lazy" }
+    if ($Lazy -or $ForceLazy) { $args += "--lazy" }
     $spArgs = @{
         FilePath               = $pythonExe
         ArgumentList           = $args
@@ -164,7 +177,7 @@ try {
             $webStdout = Join-Path $env:TEMP "agent-lab-web.out.log"
             $webStderr = Join-Path $env:TEMP "agent-lab-web.err.log"
             Write-Host "[local-web] starting local model and web UI ..." -ForegroundColor Cyan
-            $py = Start-PythonOpenAI -Stdout $pyStdout -Stderr $pyStderr
+            $py = Start-PythonOpenAI -Stdout $pyStdout -Stderr $pyStderr -ForceLazy
             try {
                 if (-not (Wait-Health -Url (Get-BaseHealthURL) -TimeoutSec 30)) {
                     if (Test-Path $pyStderr) { Get-Content $pyStderr | Select-Object -Last 40 | Write-Host }

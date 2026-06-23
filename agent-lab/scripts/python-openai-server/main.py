@@ -167,11 +167,26 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path in {"/", "/healthz", "/v1/models"}:
+            configured_model = os.environ.get("PY_OPENAI_MODEL", "Qwen/Qwen1.5-1.8B-Chat")
+            loaded_model = MODEL_ID or ""
+            device = DEVICE or os.environ.get("PY_OPENAI_DEVICE", "auto")
             if self.path == "/v1/models":
-                model_id = os.environ.get("PY_OPENAI_MODEL", "Qwen/Qwen1.5-1.8B-Chat")
-                self.send_json(200, {"object": "list", "data": [{"id": model_id, "object": "model"}]})
+                self.send_json(200, {
+                    "object": "list",
+                    "service": "python-openai-server",
+                    "configured_model": configured_model,
+                    "loaded_model": loaded_model,
+                    "device": device,
+                    "data": [{"id": loaded_model or configured_model, "object": "model", "owned_by": "local-transformers"}],
+                })
             else:
-                self.send_json(200, {"ok": True, "service": "python-openai-server"})
+                self.send_json(200, {
+                    "ok": True,
+                    "service": "python-openai-server",
+                    "configured_model": configured_model,
+                    "loaded_model": loaded_model,
+                    "device": device,
+                })
             return
         self.send_json(404, {"error": {"message": "not found"}})
 

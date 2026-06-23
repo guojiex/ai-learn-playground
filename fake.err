@@ -1,3 +1,0 @@
-2026/06/13 22:26:23 fake-openai listening on http://127.0.0.1:18080/v1
-2026/06/13 22:26:23 listen tcp 127.0.0.1:18080: bind: Only one usage of each socket address (protocol/network address/port) is normally permitted.
-exit status 1
