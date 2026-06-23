@@ -72,10 +72,18 @@ function Invoke-PipInstall($PythonExe, $Arguments, $LogPath, $Label) {
     Write-Host "[python-env] log: $LogPath" -ForegroundColor DarkGray
     $argList = @("-m", "pip") + $Arguments + @("--progress-bar", "on")
     if ($VerbosePip) { $argList += "--verbose" }
+    $logWriteFailed = $false
     & $PythonExe @argList 2>&1 | ForEach-Object {
         $line = $_.ToString()
-        Add-Content -Path $LogPath -Value $line
         Write-Host $line
+        if (-not $logWriteFailed) {
+            try {
+                Add-Content -Path $LogPath -Value $line -ErrorAction Stop
+            } catch {
+                $logWriteFailed = $true
+                Write-Host "[python-env] log file is locked; continuing with terminal output only" -ForegroundColor Yellow
+            }
+        }
     }
     $code = $LASTEXITCODE
     if ($null -eq $code) { $code = 0 }
@@ -91,7 +99,7 @@ function Ensure-PythonEnv {
     $pythonExe = Get-PythonExe
     $requirements = Join-Path $AgentLab "scripts\python-openai-server\requirements.txt"
     $stamp = Join-Path $venv ".requirements.stamp"
-    $pipLog = Join-Path $venv "pip-install.log"
+    $pipLog = Join-Path $venv ("pip-install-" + $PID + ".log")
     if (-not (Test-Path $pythonExe)) {
         Write-Host "[python-env] creating virtual environment at $venv ..." -ForegroundColor Cyan
         python -m venv $venv
