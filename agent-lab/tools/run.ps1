@@ -3,6 +3,7 @@
 # Usage from repo root:
 #   .\agent-lab\tools\run.ps1 fake
 #   .\agent-lab\tools\run.ps1 local-web
+#   .\agent-lab\tools\run.ps1 local-web -Lazy
 #   .\agent-lab\tools\run.ps1 local-web -QuietPip
 #   .\agent-lab\tools\run.ps1 py-openai
 #   .\agent-lab\tools\run.ps1 py-chat -Msg "hello"
@@ -38,6 +39,30 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $AgentLab = Join-Path $RepoRoot "agent-lab"
 Push-Location $RepoRoot
+
+function Load-LocalEnv($Path) {
+    if (-not (Test-Path $Path)) { return }
+    $keys = New-Object System.Collections.Generic.List[string]
+    Get-Content $Path | ForEach-Object {
+        $line = $_.Trim()
+        if ($line -eq "" -or $line.StartsWith("#")) { return }
+        $idx = $line.IndexOf("=")
+        if ($idx -le 0) { return }
+        $name = $line.Substring(0, $idx).Trim()
+        $value = $line.Substring($idx + 1).Trim().Trim('"').Trim("'")
+        if ($name -match "^[A-Za-z_][A-Za-z0-9_]*$") {
+            Set-Item -Path "Env:$name" -Value $value
+            $keys.Add($name)
+        }
+    }
+    $keyText = if ($keys.Count -gt 0) { $keys -join "," } else { "none" }
+    Write-Host "[env] loaded local environment from $Path keys=$keyText" -ForegroundColor DarkGray
+}
+
+Load-LocalEnv (Join-Path $RepoRoot ".env.local")
+Load-LocalEnv (Join-Path $AgentLab ".env.local")
+if ($env:HF_TOKEN -and -not $env:HF_HUB_TOKEN) { $env:HF_HUB_TOKEN = $env:HF_TOKEN }
+if ($env:HF_TOKEN -and -not $env:HUGGINGFACE_HUB_TOKEN) { $env:HUGGINGFACE_HUB_TOKEN = $env:HF_TOKEN }
 
 function Set-AgentEnv {
     $env:OPENAI_BASE_URL  = $BaseUrl
@@ -130,11 +155,11 @@ function Ensure-PythonEnv {
     return $pythonExe
 }
 
-function Start-PythonOpenAI($Stdout, $Stderr, [switch]$ForceLazy) {
+function Start-PythonOpenAI($Stdout, $Stderr) {
     $pythonExe = Ensure-PythonEnv
     $script = Join-Path $AgentLab "scripts\python-openai-server\main.py"
     $args = @($script, "--model", $PyModel, "--device", $PyDevice)
-    if ($Lazy -or $ForceLazy) { $args += "--lazy" }
+    if ($Lazy) { $args += "--lazy" }
     $spArgs = @{
         FilePath               = $pythonExe
         ArgumentList           = $args
@@ -165,6 +190,51 @@ function Stop-ListeningPort($Port, $Label) {
             }
         }
     }
+}
+
+$script:LogOffsets = @{}
+
+function Write-NewLog($Path, $Prefix) {
+    if (-not (Test-Path $Path)) { return }
+    $offset = if ($script:LogOffsets.ContainsKey($Path)) { [int64]$script:LogOffsets[$Path] } else { [int64]0 }
+    $fs = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+    try {
+        if ($fs.Length -lt $offset) { $offset = 0 }
+        $fs.Seek($offset, [System.IO.SeekOrigin]::Begin) | Out-Null
+        $sr = New-Object System.IO.StreamReader($fs)
+        while (-not $sr.EndOfStream) {
+            $line = $sr.ReadLine()
+            if ($line -ne $null -and $line.Trim() -ne "") { Write-Host "[$Prefix] $line" }
+        }
+        $script:LogOffsets[$Path] = $fs.Position
+    } finally {
+        $fs.Close()
+    }
+}
+
+function Wait-HealthWithLogs($Url, $TimeoutSec, $LogSpecs) {
+    $start = Get-Date
+    $deadline = $start.AddSeconds($TimeoutSec)
+    $nextHeartbeat = $start.AddSeconds(10)
+    while ((Get-Date) -lt $deadline) {
+        foreach ($spec in $LogSpecs) { Write-NewLog -Path $spec.Path -Prefix $spec.Prefix }
+        try {
+            Invoke-WebRequest -UseBasicParsing -TimeoutSec 1 -Uri $Url | Out-Null
+            foreach ($spec in $LogSpecs) { Write-NewLog -Path $spec.Path -Prefix $spec.Prefix }
+            return $true
+        } catch {
+            if ($_.Exception.Response) { return $true }
+            $now = Get-Date
+            if ($now -ge $nextHeartbeat) {
+                $elapsed = [int]($now - $start).TotalSeconds
+                Write-Host "[local-web] still waiting for service readiness at $Url (${elapsed}s elapsed) ..." -ForegroundColor Yellow
+                $nextHeartbeat = $now.AddSeconds(10)
+            }
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    foreach ($spec in $LogSpecs) { Write-NewLog -Path $spec.Path -Prefix $spec.Prefix }
+    return $false
 }
 
 function Get-PortFromAddr($Addr) {
@@ -202,9 +272,12 @@ try {
             Stop-ListeningPort -Port (Get-PortFromAddr $BaseUrl) -Label "model server"
             Start-Sleep -Milliseconds 300
             Write-Host "[local-web] starting local model and web UI ..." -ForegroundColor Cyan
-            $py = Start-PythonOpenAI -Stdout $pyStdout -Stderr $pyStderr -ForceLazy
+            if (-not $Lazy) { Write-Host "[local-web] preloading model before opening web UI; first run may download model files" -ForegroundColor Yellow }
+            Remove-Item $pyStdout,$pyStderr,$webStdout,$webStderr -ErrorAction SilentlyContinue
+            $py = Start-PythonOpenAI -Stdout $pyStdout -Stderr $pyStderr
+            $pyLogs = @(@{ Path = $pyStdout; Prefix = "py" }, @{ Path = $pyStderr; Prefix = "py" })
             try {
-                if (-not (Wait-Health -Url (Get-BaseHealthURL) -TimeoutSec 30)) {
+                if (-not (Wait-HealthWithLogs -Url (Get-BaseHealthURL) -TimeoutSec 1200 -LogSpecs $pyLogs)) {
                     if (Test-Path $pyStderr) { Get-Content $pyStderr | Select-Object -Last 40 | Write-Host }
                     throw "local model server not ready"
                 }
@@ -218,13 +291,18 @@ try {
                     RedirectStandardError  = $webStderr
                 }
                 $web = Start-Process @webArgs
+                $allLogs = @(@{ Path = $pyStdout; Prefix = "py" }, @{ Path = $pyStderr; Prefix = "py" }, @{ Path = $webStdout; Prefix = "web" }, @{ Path = $webStderr; Prefix = "web" })
                 try {
-                    if (-not (Wait-Health -Url ("http://" + $WebAddr + "/healthz") -TimeoutSec 30)) {
+                    if (-not (Wait-HealthWithLogs -Url ("http://" + $WebAddr + "/healthz") -TimeoutSec 30 -LogSpecs $allLogs)) {
                         if (Test-Path $webStderr) { Get-Content $webStderr | Select-Object -Last 40 | Write-Host }
                         throw "web UI not ready"
                     }
                     Write-Host "[local-web] open http://$WebAddr/" -ForegroundColor Green
-                    Wait-Process -Id $web.Id
+                    while (-not $web.HasExited -and -not $py.HasExited) {
+                        foreach ($spec in $allLogs) { Write-NewLog -Path $spec.Path -Prefix $spec.Prefix }
+                        Start-Sleep -Milliseconds 500
+                    }
+                    foreach ($spec in $allLogs) { Write-NewLog -Path $spec.Path -Prefix $spec.Prefix }
                 } finally {
                     Stop-Process -Id $web.Id -Force -ErrorAction SilentlyContinue
                     Remove-Item $webStdout,$webStderr -ErrorAction SilentlyContinue

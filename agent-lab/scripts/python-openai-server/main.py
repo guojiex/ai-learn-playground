@@ -2,59 +2,67 @@ import argparse
 import json
 import os
 import sys
+import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 MODEL = None
 TOKENIZER = None
-DEVICE = None
 MODEL_ID = None
+DEVICE = None
+MODEL_LOCK = threading.Lock()
 
 
 def load_model(model_id, device):
     global MODEL, TOKENIZER, DEVICE, MODEL_ID
-    if MODEL is not None and TOKENIZER is not None and MODEL_ID == model_id:
-        return TOKENIZER, MODEL, DEVICE
-    try:
-        import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
-    except ModuleNotFoundError as exc:
-        name = exc.name or str(exc)
-        raise RuntimeError(
-            f"missing python dependency: {name}. Install dependencies with: python -m pip install torch transformers accelerate"
-        ) from exc
+    with MODEL_LOCK:
+        if MODEL is not None and TOKENIZER is not None and MODEL_ID == model_id:
+            return TOKENIZER, MODEL, DEVICE
+        try:
+            import torch
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+        except ModuleNotFoundError as exc:
+            name = exc.name or str(exc)
+            raise RuntimeError(
+                f"missing python dependency: {name}. Install dependencies with: python -m pip install torch transformers accelerate"
+            ) from exc
 
-    if device == "auto":
-        if torch.cuda.is_available():
-            selected = "cuda"
-        elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            selected = "mps"
+        if device == "auto":
+            if torch.cuda.is_available():
+                selected = "cuda"
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                selected = "mps"
+            else:
+                selected = "cpu"
         else:
-            selected = "cpu"
-    else:
-        selected = device
+            selected = device
 
-    print(f"[python-openai-server] loading model={model_id} device={selected}", file=sys.stderr, flush=True)
-    tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-    kwargs = {"trust_remote_code": True, "low_cpu_mem_usage": True}
-    if selected == "cuda":
-        kwargs["device_map"] = "auto"
-        kwargs["torch_dtype"] = torch.bfloat16
-    elif selected == "mps":
-        kwargs["torch_dtype"] = torch.bfloat16
-    elif selected == "cpu":
-        kwargs["torch_dtype"] = torch.float32
-    model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
-    if selected in {"mps", "cpu"}:
-        model = model.to(selected)
-    model.eval()
-    MODEL = model
-    TOKENIZER = tokenizer
-    DEVICE = selected
-    MODEL_ID = model_id
-    print("[python-openai-server] model ready", file=sys.stderr, flush=True)
-    return TOKENIZER, MODEL, DEVICE
+        print(f"[python-openai-server] loading model={model_id} device={selected}", file=sys.stderr, flush=True)
+        print("[python-openai-server] loading tokenizer ...", file=sys.stderr, flush=True)
+        tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+        print("[python-openai-server] tokenizer ready", file=sys.stderr, flush=True)
+        kwargs = {"trust_remote_code": True, "low_cpu_mem_usage": True}
+        if selected == "cuda":
+            kwargs["device_map"] = "auto"
+            kwargs["torch_dtype"] = torch.bfloat16
+        elif selected == "mps":
+            kwargs["torch_dtype"] = torch.bfloat16
+        elif selected == "cpu":
+            kwargs["torch_dtype"] = torch.float32
+        print("[python-openai-server] loading model weights ...", file=sys.stderr, flush=True)
+        model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
+        print("[python-openai-server] model weights ready", file=sys.stderr, flush=True)
+        if selected in {"mps", "cpu"}:
+            print(f"[python-openai-server] moving model to {selected} ...", file=sys.stderr, flush=True)
+            model = model.to(selected)
+        model.eval()
+        MODEL = model
+        TOKENIZER = tokenizer
+        DEVICE = selected
+        MODEL_ID = model_id
+        print("[python-openai-server] model ready", file=sys.stderr, flush=True)
+        return TOKENIZER, MODEL, DEVICE
 
 
 def normalize_messages(messages):
