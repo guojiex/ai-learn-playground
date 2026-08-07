@@ -540,27 +540,61 @@
 <div class="milestone-row"><div class="ms-num">M11</div><div>综合 · 完整电商文案生成流水线</div><span class="status-badge status-done">已完成</span></div>
 
 <h2 id="m0">4. M0 · 最小骨架</h2>
-<p>M0 要做的事非常简单: 发一条消息给 LLM, 流式收到回复. 关键是把 <b>可运行的骨架</b> 搭好.</p>
+<p>M0 要做的事非常简单: 发一条消息给 LLM, 流式收到回复. 但 "简单" 背后有三个设计决策值得理解, 它们会影响后续所有里程碑.</p>
+
+<div class="card">
+  <h3>设计决策 1: 为什么用 OpenAI 兼容协议?</h3>
+  <p>市面上的本地推理后端 (llama.cpp / Ollama / vLLM) 都暴露了 <b>同一套</b> HTTP 接口: <code class="inline">POST /v1/chat/completions</code>. 只要我们按这个协议发请求, 就能:</p>
+  <ul>
+    <li><b>换后端零成本</b>: 今天用 llama.cpp, 明天换 Ollama, 代码一行不改</li>
+    <li><b>测试零依赖</b>: 写一个 fake server 模拟这个协议, 不下载任何模型也能跑通全流程</li>
+    <li><b>未来可切云</b>: 想用 OpenAI/Claude API? 同一个 Client, 换个 base_url 即可</li>
+  </ul>
+  <p class="muted">反例: 如果自己设计协议, 每换一个后端就要写一层 adapter, 教学项目会陷入胶水代码.</p>
+</div>
+
+<div class="card">
+  <h3>设计决策 2: 为什么用 interface 而不是直接调 HTTP?</h3>
+  <p><code class="inline">Client</code> 是一个 interface, 只有两个方法. 测试时可以注入 fake, 生产时注入真实 HTTP client. 这是 Go 的惯用做法, 但更重要的是: <b>它让 "调 LLM" 和 "怎么调 LLM" 彻底解耦</b>.</p>
+  <pre>
+// llm/client.go — 只有两方法的极简接口
+type Client interface {
+    Chat(ctx, req) (ChatResponse, error)         // 非流式: 等完整回复
+    ChatStream(ctx, req) (&lt;-chan StreamChunk, error) // 流式: 逐字返回
+}</pre>
+  <p>后续里程碑 (M10 模型路由) 只需实现这个 interface, 就能在不改动任何 agent 代码的前提下, 让 "调哪个模型" 变成运行时决策.</p>
+</div>
+
+<div class="card">
+  <h3>设计决策 3: 为什么用 SSE 流式?</h3>
+  <p>用户发一句话, 模型可能要推理 5-10 秒. 如果用非流式 (等完整回复再返回), 用户体验是 "转圈 8 秒 → 突然出现一大段文字". 用流式 (SSE / Server-Sent Events), 模型每生成一个 token 就推一次, 用户看到的是 "字一个一个蹦出来".</p>
+  <pre>
+// SSE 流式原理 (3 层流式穿透)
+浏览器 ←SSE←  web handler  ←HTTP stream←  LLM server
+  │              │                │
+  │ fetch()      │ http.Flusher   │ stream=true
+  │ onmessage    │ 逐帧 flush     │ data: {"content":"你"}\n\n
+  ▼              ▼                ▼
+chat.js 拼接    writeSSE()      OpenAI 协议</pre>
+  <p>关键: 每收到一个 delta, 立刻 <code class="inline">flusher.Flush()</code> 写回 TCP, 不缓冲. 这就是 "打字机效果" 的实现原理.</p>
+</div>
+
 <h3>核心数据结构</h3>
 <pre>
-// llm/client.go — 与 OpenAI 兼容 server 通信的最小接口
+// Message 的 role 字段决定了消息在对话中的角色
 type Message struct {
-    Role    Role   `json:"role"`
-    Content string `json:"content,omitempty"`
+    Role    Role   `json:"role"`    // system / user / assistant / tool
+    Content string `json:"content"`
 }
-type ChatRequest struct {
-    Model    string    `json:"model"`
-    Messages []Message `json:"messages"`
-    Stream   bool      `json:"stream,omitempty"`
-}
-type Client interface {
-    Chat(ctx, req) (ChatResponse, error)
-    ChatStream(ctx, req) (&lt;-chan StreamChunk, error)
-}
+// system:    "你是一个文案专家" — 设定人设, 放在 messages[0]
+// user:      "帮我写标题"       — 用户输入
+// assistant: "好的, 标题是..."  — 模型回复
+// tool:      '{"price": 299}'   — 工具返回结果 (M2+)
 </pre>
+
 <h3>启动方式 (Fake Server + Web)</h3>
 <pre>
-# 终端 A: 启动 fake LLM server (echo 模式, 不需要真实模型)
+# 终端 A: 启动 fake LLM server (不需要真实模型)
 go run ./agent-lab/scripts/fake-openai
 
 # 终端 B: 启动 Web UI
@@ -571,22 +605,95 @@ go run ./agent-lab/cmd/web
 # 浏览器打开 http://127.0.0.1:8090
 </pre>
 
-<h2 id="m1">5. M1 · 多轮对话</h2>
-<p>M1 引入两个新模块:</p>
 <div class="card">
-  <h3><code class="inline">internal/memory/shortterm.go</code> — 会话记忆</h3>
-  <p>提供 <code class="inline">ShortTerm</code> 结构, 负责:</p>
+  <h3>常见陷阱</h3>
   <ul>
-    <li>存储 <code class="inline">system + [user, assistant, user, assistant, ...]</code> 的消息序列</li>
-    <li>粗略估算 token (中文 1.5 字 ≈ 1 token, 英文 4 字 ≈ 1 token)</li>
-    <li>超出预算时先滑窗丢最旧的, 再不行就调 LLM 把最旧一半摘要成一条</li>
-    <li>支持 <code class="inline">:save / :load</code> 到 JSON 文件</li>
+    <li><b>SSE 不 flush</b>: 忘记调 <code class="inline">flusher.Flush()</code> → 浏览器等很久才一次性收到全部, 失去流式效果</li>
+    <li><b>base_url 末尾</b>: <code class="inline">/v1</code> 不能少, fake-openai 监听的是 <code class="inline">http://127.0.0.1:18080/v1</code>, 不是 <code class="inline">:18080</code></li>
+    <li><b>API Key</b>: 本地后端不校验 key, 但协议要求传, 所以用占位符 <code class="inline">sk-local</code></li>
   </ul>
 </div>
+
+<h2 id="m1">5. M1 · 多轮对话</h2>
+<p>M1 解决一个根本问题: <b>LLM 本身是无状态的</b>. 每次 API 调用都是独立的, 模型不记得上一轮说了什么. 要让对话 "连续", 我们必须自己维护消息历史, 每次把完整历史发给模型.</p>
+
 <div class="card">
-  <h3><code class="inline">internal/prompt/persona.go</code> — 角色卡</h3>
-  <p>一个 persona = 一个 system prompt. 支持从 <code class="inline">.md</code> 文件加载, 方便换风格.</p>
+  <h3>为什么 LLM 是无状态的?</h3>
+  <p>LLM 的推理过程是: 输入一段文本 → 输出一段文本. 模型权重在推理时不更新, 也没有 "会话" 概念. 所谓 "多轮对话", 其实是每次调用都把 <b>之前的所有消息</b> 重新发一遍:</p>
+  <pre>
+第 1 轮: 发 [system, user1]              → 模型回 assistant1
+第 2 轮: 发 [system, user1, assistant1, user2]  → 模型回 assistant2
+第 3 轮: 发 [system, user1, assistant1, user2, assistant2, user3] → ...
+         ↑ 历史越来越长, token 越来越多!</pre>
+  <p class="muted">这意味着: 对话越长, 每次请求的 token 越多, 推理越慢, 成本越高 (云端按 token 计费). 所以必须有 "预算管理".</p>
 </div>
+
+<div class="card">
+  <h3>短期记忆的本质</h3>
+  <p><code class="inline">ShortTerm</code> 就是一个消息列表加上 token 预算管理. 它的 <code class="inline">Snapshot()</code> 返回 <code class="inline">[system, user1, assistant1, user2, ...]</code>, 直接作为 LLM 请求的 <code class="inline">messages</code> 字段.</p>
+  <pre>
+// memory/shortterm.go 的核心结构
+type ShortTerm struct {
+    system  string         // system prompt (角色卡)
+    msgs    []Message      // [user, assistant, user, assistant, ...]
+    budget  int            // token 预算 (如 4096)
+}
+func (m *ShortTerm) Snapshot() []Message {
+    return append([]Message{{Role: "system", Content: m.system}}, m.msgs...)
+}</pre>
+</div>
+
+<div class="card">
+  <h3>token 预估: 为什么不精确?</h3>
+  <p>真正的 token 数需要用 tokenizer (如 tiktoken) 精确切分. 但为了零依赖, 我们用经验公式估算:</p>
+  <pre>
+中文: 1.5 字 ≈ 1 token   (因为中文一个字通常编码为 1-2 个 token)
+英文: 4 字符 ≈ 1 token   (因为英文用 BPE, 常见词组会合并)
+混合: 按字符类型分别估算后相加</pre>
+  <p class="muted">这个估算偏差约 ±20%, 对 "是否需要压缩" 的判断够用. 真正的 token 数由模型返回的 <code class="inline">usage.prompt_tokens</code> 给出.</p>
+</div>
+
+<div class="card">
+  <h3>两步压缩策略: 滑窗 → 摘要</h3>
+  <p>当历史消息的 token 超出预算时, <code class="inline">EnsureBudget()</code> 分两步压缩:</p>
+  <div class="call-chain">
+    <div class="call-step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h4>滑窗 (Sliding Window)</h4>
+        <p>丢弃最早的消息, 只保留最近的 N 条. <b>优点</b>: 零延迟, 无需调 LLM. <b>缺点</b>: 丢失早期上下文, 模型可能 "忘记" 用户说过的重要信息.</p>
+      </div>
+    </div>
+    <div class="call-step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h4>摘要 (Summarization)</h4>
+        <p>如果滑窗后仍超预算, 把被丢弃的消息发给 LLM: "请把以下对话摘要成一段话". 摘要结果作为一条 <code class="inline">assistant</code> 消息放回历史. <b>优点</b>: 保留关键信息. <b>缺点</b>: 多一次 LLM 调用, 有延迟.</p>
+      </div>
+    </div>
+  </div>
+  <pre>
+// EnsureBudget 的伪代码
+func (m *ShortTerm) EnsureBudget(ctx, client, model, budget) {
+    if m.estimateTokens() <= budget { return }  // 没超, 不用管
+
+    // 第 1 步: 滑窗 — 丢掉最旧的几条
+    m.msgs = m.msgs[len(m.msgs)/4:]  // 保留后 3/4
+
+    if m.estimateTokens() <= budget { return }  // 够了
+
+    // 第 2 步: 摘要 — 把旧消息压缩成一条
+    summary = client.Chat("请摘要以下对话: " + oldMsgs)
+    m.msgs = append([]Message{{assistant, summary}}, m.msgs[recent:]...)
+}</pre>
+</div>
+
+<div class="card">
+  <h3>角色卡 (system prompt): 为什么保存后下条消息才生效?</h3>
+  <p>system prompt 是 <code class="inline">messages[0]</code>, 设定 agent 的人设. 用户修改角色卡后, <b>不重写已有消息</b>, 只更新 <code class="inline">ShortTerm.system</code> 字段. 下一次 <code class="inline">Snapshot()</code> 时, 新的 system 会自动拼到最前面.</p>
+  <p class="muted">如果重写历史消息, 会破坏对话的因果链 — 模型会困惑 "为什么我说过的话变了". 所以 "保存后下条消息生效" 是最安全的设计.</p>
+</div>
+
 <h3>关键调用流</h3>
 <pre>
 1. 用户输入 → memory.Append(user, 输入)
@@ -595,6 +702,7 @@ go run ./agent-lab/cmd/web
 4. client.ChatStream(ctx, {Model: model, Messages: msgs})
 5. 收集流式回复 → memory.Append(assistant, 完整回复)
 </pre>
+
 <h3>Web UI 的改变</h3>
 <ul>
   <li>左侧新增"会话列表", 新建 / 切换 / 重命名 / 删除</li>
@@ -604,247 +712,611 @@ go run ./agent-lab/cmd/web
 </ul>
 
 <h2 id="m2">6. M2 · 原生 Tool Calling</h2>
-<p>M2 让模型 <b>自己决定要不要调工具</b>. 利用 OpenAI 协议里的 <code class="inline">tools</code> + <code class="inline">tool_calls</code> 字段, 模型在合适的时候输出工具名和参数, 我们执行后把结果喂回去.</p>
+<p>M2 让模型 <b>自己决定要不要调工具</b>. 在此之前, Agent 只能 "说" 不能 "做" — 它不能查库存、不能算价格、不能检查合规. M2 之后, Agent 有了 "手".</p>
+
 <div class="card">
-  <h3>关键文件</h3>
+  <h3>为什么 LLM 需要工具?</h3>
+  <p>LLM 的知识有两个硬限制:</p>
   <ul>
-    <li><code class="inline">internal/tools/</code> — Tool 接口 + Registry: <code class="inline">product_lookup</code> (查商品), <code class="inline">price_format</code> (格式化价格), <code class="inline">platform_lint</code> (平台合规), <code class="inline">slang_check</code> (黑话检查)</li>
-    <li><code class="inline">internal/agent/native.go</code> — <code class="inline">Loop()</code>: LLM → tool_calls → 执行 → 喂回 → 再 LLM, 直到模型不再调工具</li>
-    <li><code class="inline">internal/web/handlers_tools.go</code> — /tools 面板: 试调用 (DryRun) 工具, 不经过 LLM</li>
+    <li><b>训练截止</b>: 模型的知识停在训练数据的时间点, 不知道 "今天" 的库存和价格</li>
+    <li><b>不能计算</b>: 模型是 "下一个 token 预测器", 算 <code class="inline">299 * 0.8</code> 可能出错, 但 <code class="inline">price_format</code> 工具用 Go 代码算 100% 正确</li>
+  </ul>
+  <p>工具的本质是: <b>让 LLM 负责决策 (何时调什么), 让传统代码负责执行 (确定性逻辑)</b>. 两者各取所长.</p>
+</div>
+
+<div class="card">
+  <h3>OpenAI Tool Calling 协议详解</h3>
+  <p>协议分两半 — 请求里告诉模型 "有哪些工具可用", 响应里模型告诉你 "我想调哪个".</p>
+  <pre>
+// 1. 请求: 在 tools 字段里声明工具的 JSON Schema
+{
+  "model": "qwen2.5-7b",
+  "messages": [{"role":"user","content":"sku_001 多少钱?"}],
+  "tools": [{
+    "type": "function",
+    "function": {
+      "name": "product_lookup",
+      "description": "查询商品信息 (名称/价格/库存)",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "sku_id": {"type":"string","description":"商品 SKU 编号"}
+        },
+        "required": ["sku_id"]
+      }
+    }
+  }]
+}
+
+// 2. 响应: 模型决定调用工具时, tool_calls 字段非空
+{
+  "role": "assistant",
+  "tool_calls": [{
+    "id": "call_abc123",
+    "function": {
+      "name": "product_lookup",
+      "arguments": "{\"sku_id\":\"sku_001\"}"  // 注意: 是 JSON 字符串
+    }
+  }]
+}</pre>
+  <p class="muted">模型看到 <code class="inline">description</code> 后, 会理解 "这个工具能干什么, 什么时候该用". 写好 description 是工具设计的核心.</p>
+</div>
+
+<div class="card">
+  <h3>Loop 机制: 为什么是循环?</h3>
+  <p>一次工具调用不够 — 模型可能调完 <code class="inline">product_lookup</code> 后, 还想调 <code class="inline">price_format</code> 格式化价格, 再调 <code class="inline">platform_lint</code> 检查合规. 所以工具调用是一个 <b>循环</b>:</p>
+  <pre>
+// Loop 的核心循环 (最多 MaxSteps 轮, 防无限循环)
+for step := 0; step < maxSteps; step++ {
+    resp = client.Chat(ctx, req)           // 1. 问 LLM (带 tools + 历史)
+    if len(resp.ToolCalls) == 0 { break }   // 2. 没有工具调用 → 模型给了最终回复, 结束
+    for _, tc := range resp.ToolCalls {     // 3. 执行每个工具调用
+        out = registry.Get(tc.Name).Invoke(ctx, tc.Args)
+        messages = append(messages, toolResult(out))  // 4. 把结果作为 tool 消息喂回
+    }
+    // 5. 循环回到第 1 步, 模型看到了工具结果, 决定继续调工具还是回复
+}</pre>
+  <p><b>MaxSteps</b> (默认 8) 是安全阀 — 如果模型陷入 "调工具 → 看结果 → 再调工具" 的死循环, 到了上限就强制停止.</p>
+</div>
+
+<div class="card">
+  <h3>工具设计三原则</h3>
+  <ul>
+    <li><b>Description 面向模型</b>: 不要写 "查商品" (太模糊), 要写 "查询商品信息 (名称/价格/库存/品牌). 输入 SKU 编号, 返回 JSON." — 模型靠这段文字判断何时该用</li>
+    <li><b>返回值结构化</b>: 返回 JSON 字符串 <code class="inline">{"name":"毛巾","price":299,"stock":50}</code>, 不要返回自然语言 — 模型需要解析结果来决定下一步</li>
+    <li><b>参数尽量少</b>: 一个工具 3 个参数比 10 个参数好. 参数越多, 模型越容易填错</li>
   </ul>
 </div>
-<pre>
-// Loop 的核心循环 (最多 MaxSteps 轮)
-for step := 0; step < maxSteps; step++ {
-    resp = client.Chat(ctx, req)           // 1. 问 LLM
-    if len(resp.ToolCalls) == 0 { break }   // 2. 没有工具调用 → 结束
-    for _, tc := range resp.ToolCalls {     // 3. 执行每个工具
-        out = registry.Get(tc.Name).Invoke(ctx, tc.Args)
-        messages = append(messages, toolResult(out))  // 4. 喂回结果
-    }
-}
-</pre>
 
 <h2 id="m3">7. M3 · 手写 ReAct</h2>
-<p>如果模型不支持 <code class="inline">tool_calls</code> (或你想理解原理), M3 手写 <b>Thought-Action-Observation</b> 文本协议. 模型输出 JSON <code class="inline">{"thought":"...","action":"tool_name","args":{...}}</code>, 我们解析后执行, 再把 <code class="inline">{"observation":"结果"}</code> 喂回去.</p>
+<p>不是所有模型都支持 <code class="inline">tool_calls</code> 字段 (比如老模型、小模型). M3 手写 <b>ReAct</b> (Reason + Act) 协议 — 用纯文本让模型输出 "思考 → 行动 → 观察" 的 JSON, 不依赖协议层支持.</p>
+
 <div class="card">
-  <h3>关键文件</h3>
-  <ul>
-    <li><code class="inline">internal/agent/react.go</code> — <code class="inline">Loop()</code> ReAct 版本: system prompt 约定 JSON 格式, 解析容错 (裸 JSON / ```json / 大括号提取)</li>
-    <li><code class="inline">internal/agent/parse.go</code> — 容错 JSON 提取: <code class="inline">extractFenced</code> / <code class="inline">extractFirstBracePair</code></li>
-    <li>Chat 面板底部 <code class="inline">agent 模式</code> 下拉可切换 native / react</li>
-  </ul>
+  <h3>ReAct 的思想</h3>
+  <p>2022 年 Yao 等人提出: 让模型 <b>先推理再行动</b>. 每一步输出三样东西:</p>
+  <pre>
+Thought:  "用户问 sku_001 的价格, 我需要先查商品信息"
+Action:   "product_lookup"
+Args:     {"sku_id": "sku_001"}
+
+→ 我们执行工具, 返回结果 →
+
+Observation: '{"name":"毛巾","price":299,"stock":50}'
+
+Thought:  "价格是 299, 用户可能想知道折扣价, 我格式化一下"
+Action:   "price_format"
+Args:     {"price": 299, "discount": 0.8}
+
+→ 执行 →
+
+Observation: '{"formatted":"NT$239","original":"NT$299"}'
+
+Thought:  "我有全部信息了, 可以回复用户了"
+Action:   "finish"  // 特殊 action, 表示结束</pre>
+  <p class="muted">关键区别: native (M2) 靠协议层的 <code class="inline">tool_calls</code> 字段, ReAct (M3) 靠 prompt 工程让模型在 content 里输出 JSON. 前者更准确, 后者兼容性更好.</p>
 </div>
-<p class="muted" style="font-size:13px">native vs react: native 靠模型原生能力 (更快更准), react 靠 prompt 工程 (兼容性更好, 但多一轮解析开销). 两者共享同一套工具.</p>
+
+<div class="card">
+  <h3>为什么需要容错 JSON 解析?</h3>
+  <p>模型不是机器 — 它经常在 JSON 前后加废话:</p>
+  <pre>
+模型输出 (理想):  {"thought":"...","action":"product_lookup","args":{"sku_id":"001"}}
+模型输出 (现实):  好的, 我来查一下商品信息。
+                   ```json
+                   {"thought":"需要查商品","action":"product_lookup","args":{"sku_id":"001"}}
+                   ```
+                   希望能帮到你!</pre>
+  <p>所以我们写了 <b>三层容错提取</b>:</p>
+  <ul>
+    <li><code class="inline">extractFenced</code>: 先找 <code class="inline">```json ... ```</code> 代码块</li>
+    <li><code class="inline">extractFirstBracePair</code>: 再找第一个 <code class="inline">{ ... }</code> 大括号对 (用深度计数)</li>
+    <li>直接 <code class="inline">json.Unmarshal</code>: 如果输出本身就是裸 JSON</li>
+  </ul>
+  <p>三种策略依次尝试, 命中即停. 这套容错逻辑在 M7 (Multi-Agent) 和 M9 (Judge) 中反复复用.</p>
+</div>
+
+<div class="card">
+  <h3>native vs react: 本质对比</h3>
+  <table>
+    <tr><th></th><th>native (M2)</th><th>react (M3)</th></tr>
+    <tr><td>工具声明</td><td>请求的 <code class="inline">tools</code> 字段</td><td>system prompt 里文字描述</td></tr>
+    <tr><td>工具调用</td><td>响应的 <code class="inline">tool_calls</code> 字段</td><td>content 里的 JSON</td></tr>
+    <tr><td>准确性</td><td>高 (协议保证)</td><td>中 (依赖 prompt + 解析)</td></tr>
+    <tr><td>兼容性</td><td>需模型支持</td><td>任何模型</td></tr>
+    <tr><td>思维链</td><td>无 (直接输出 tool_calls)</td><td>有 (Thought 字段可观测)</td></tr>
+  </table>
+</div>
 
 <h2 id="m4">8. M4 · 记忆 (短期摘要 + 长期 KV)</h2>
-<p>M4 给 Agent 加 "记住卖家偏好" 的能力. 两层记忆:</p>
+<p>M1 的短期记忆只在一个会话内有效 — 新建会话就丢了. M4 加了一层 <b>长期记忆</b>: Agent 能记住 "卖家 A001 喜欢亲切语气", 跨会话不丢失.</p>
+
 <div class="card">
-  <h3>短期记忆 (M1 已有, M4 增强)</h3>
-  <p>滑窗 + 摘要: 上下文超预算时, 先滑窗丢最旧消息, 再不够就把旧消息摘要成一条. M4 把摘要也做成了 tool (<code class="inline">memory_summarize</code>).</p>
+  <h3>两层记忆架构</h3>
+  <table>
+    <tr><th></th><th>短期记忆 (M1)</th><th>长期记忆 (M4)</th></tr>
+    <tr><td>存储</td><td>内存 (消息列表)</td><td>SQLite (KV 表)</td></tr>
+    <tr><td>生命周期</td><td>一个会话</td><td>跨会话, 永久</td></tr>
+    <tr><td>内容</td><td>完整对话历史</td><td>结构化偏好 (tone/keywords/audience)</td></tr>
+    <tr><td>管理</td><td>自动滑窗/摘要</td><td>Agent 自主写入, 人类可遗忘</td></tr>
+    <tr><td>工具</td><td>无 (内部管理)</td><td><code class="inline">memory_put</code> / <code class="inline">memory_get</code></td></tr>
+  </table>
+  <pre>
+// 架构: 短期记忆在上下文里, 长期记忆在工具里
+
+用户: "帮我写毛巾标题, 风格亲切一点"
+  │
+  ├─ Agent 调 memory_get(seller:A001, "tone")  → "亲切活泼, 多用 emoji"
+  │   (从长期记忆取出偏好, 注入上下文)
+  │
+  ├─ Agent 生成文案 (带上 tone 偏好)
+  │
+  └─ Agent 调 memory_put(seller:A001, "last_sku", "sku_001")
+      (把本次操作写入长期记忆, 下次可用)</pre>
 </div>
+
 <div class="card">
-  <h3>长期记忆 (M4 新增)</h3>
-  <ul>
-    <li><code class="inline">internal/memory/kv.go</code> — <code class="inline">KV</code> 结构: namespace + key → value, 持久化到 SQLite</li>
-    <li>两个工具: <code class="inline">memory_put</code> (写入) / <code class="inline">memory_get</code> (读取)</li>
-    <li>namespace = <code class="inline">seller:ID</code>, 让不同卖家的记忆隔离</li>
-    <li>Chat 面板底部 <code class="inline">seller:</code> 输入框决定当前 namespace</li>
-  </ul>
-</div>
-<pre>
-# agent 自动写入的长期记忆示例 (SQLite kv_store 表)
+  <h3>KV 模型: namespace + key → value</h3>
+  <p>长期记忆用最简单的 KV 结构, 但加了一个 <b>namespace</b> 维度来实现隔离:</p>
+  <pre>
 namespace=seller:A001, key=tone,       value="亲切活泼, 多用 emoji"
 namespace=seller:A001, key=keywords,   value=["現貨","免運","下殺"]
 namespace=seller:A001, key=audience,   value="小资女, 25-35岁"
-</pre>
-<p>/memory 面板可浏览全部长期记忆, 并 "遗忘" 单条.</p>
+namespace=seller:A002, key=tone,       value="专业简洁, 突出规格"
+                                       ↑ 不同卖家, 同一个 key, 值不同</pre>
+  <p class="muted">为什么不用关系型表 (如 seller_profiles)? 因为 Agent 写入的记忆是 <b>非结构化的</b> — 它可能今天写 <code class="inline">tone</code>, 明天写 <code class="inline">favorite_color</code>, 后天写 <code class="inline">banned_words</code>. KV 灵活适应任意 key, 不需要改表结构.</p>
+</div>
+
+<div class="card">
+  <h3>记忆的写入时机: Agent 自主决定</h3>
+  <p>我们不硬编码 "每 3 轮写一次记忆", 而是给 Agent <code class="inline">memory_put</code> 工具, 让它自己判断:</p>
+  <ul>
+    <li>用户说 "我以后都要用繁体" → Agent 调 <code class="inline">memory_put(seller:A001, "language", "繁体中文")</code></li>
+    <li>用户说 "不要用极限词" → Agent 调 <code class="inline">memory_put(seller:A001, "banned_words", ["最便宜","最低價"])</code></li>
+    <li>用户只是闲聊 → Agent 不调 memory_put, 不浪费</li>
+  </ul>
+  <p class="muted">这是 "Agentic" 的核心: 把决策权交给 LLM, 而不是用规则硬编码. Agent 可能判断错 (该记的没记), 但随着模型能力提升, 这个问题会自然缓解.</p>
+</div>
 
 <h2 id="m5">9. M5 · RAG (向量检索)</h2>
-<p>M5 让 Agent 能查 "知识库" — 平台规则文档、商品资料等. 不把文档塞进 prompt, 而是用 <b>embedding + 向量 top-k</b> 只检索相关片段.</p>
-<div class="card">
-  <h3>关键文件</h3>
-  <ul>
-    <li><code class="inline">internal/rag/</code> — Retriever: embedding → 余弦相似度 → top-k</li>
-    <li><code class="inline">internal/store/</code> — SQLite 存储 documents 表 (id / source / chunk / embedding BLOB)</li>
-    <li><code class="inline">internal/tools/kb_search.go</code> — <code class="inline">kb_search</code> 工具: Agent 自主决定何时检索</li>
-    <li><code class="inline">cmd/ingest/</code> — 把 .md 文档切块 + embedding 入库</li>
-  </ul>
-</div>
-<pre>
-# 导入平台规则到知识库
-go run ./agent-lab/cmd/ingest -dir agent-lab/data/platform_rules
-# → shopee_tw.md (2 chunks) + xiaohongshu.md (1 chunk) = 5 个文档块
+<p>M5 让 Agent 能查 <b>知识库</b> — 平台规则、商品手册、运营指南等. 关键不是 "能不能查", 而是 "怎么查": 不是关键词匹配, 而是 <b>语义检索</b>.</p>
 
-# Agent 调用 kb_search 工具
-{"query": "蝦皮標題字數限制", "k": 5}
-# → 返回最相关的 top-5 文档块
-</pre>
-<p>/knowledge 面板可手动检索测试, 查看命中片段与相似度分数.</p>
+<div class="card">
+  <h3>为什么不直接把文档塞进 prompt?</h3>
+  <p>蝦皮台湾的运营规则可能有 50 页, 全塞进 prompt = 2 万 token, 每次 API 调用都要付这个成本. 而且 LLM 对长文本有 "中间遗忘" 问题 — 中间的信息容易被忽略.</p>
+  <p>RAG (Retrieval-Augmented Generation) 的思路: <b>只检索相关片段, 塞进 prompt</b>. 用户问 "标题字数限制", 只检索到 "蝦皮标题最多 120 字" 这一段, 5 个 token 搞定.</p>
+</div>
+
+<div class="card">
+  <h3>Embedding 原理: 文本转向量</h3>
+  <p>Embedding 模型把任意文本变成一个固定维度的浮点数向量 (如 128 维). <b>语义相近的文本, 向量也相近</b>:</p>
+  <pre>
+"蝦皮標題字數限制"     → [0.12, -0.34, 0.56, ...]  (128 维)
+"標題最多幾個字"       → [0.11, -0.33, 0.55, ...]  ← 语义相近, 向量相近
+"毛巾的材質是什麼"     → [-0.45, 0.78, -0.12, ...] ← 语义不同, 向量差异大</pre>
+  <p class="muted">这个向量由 embedding 模型 (如 bge-small-zh) 生成, 它在训练时学习了 "哪些文本语义相近". 我们不需要理解向量里每个数字的含义, 只需要比较向量间的 <b>距离</b>.</p>
+</div>
+
+<div class="card">
+  <h3>余弦相似度: 为什么用角度?</h3>
+  <p>比较两个向量的 "相似度" 有很多方法 (欧氏距离、曼哈顿距离). RAG 通常用 <b>余弦相似度</b> — 两个向量间的夹角余弦:</p>
+  <pre>
+cos(θ) = (A·B) / (|A| × |B|)
+
+θ = 0°   → cos = 1.0  (方向相同, 语义最相似)
+θ = 90°  → cos = 0.0  (正交, 语义无关)
+θ = 180° → cos = -1.0 (方向相反, 语义相反)</pre>
+  <p class="muted">为什么不用欧氏距离? 因为文本长度不同会导致向量模长不同, 但语义可能一样. 余弦相似度只看 <b>方向</b> (语义), 不看 <b>模长</b> (长度), 更适合文本检索.</p>
+</div>
+
+<div class="card">
+  <h3>切块策略: 为什么不能整篇入库?</h3>
+  <p>一篇 5000 字的文档, 如果整篇做一个 embedding, 检索时只能返回 "这篇文章相关", 不能定位到具体段落. 所以要 <b>切块 (chunking)</b>:</p>
+  <pre>
+shopee_tw.md (3000 字)
+  ├── chunk 1: "蝦皮台灣商品標題規範: 最多120字..."     (500 字)
+  ├── chunk 2: "蝦皮台灣禁止使用極限詞: 最便宜、最低價..." (500 字)
+  └── chunk 3: "蝦皮台灣圖片要求: 至少5張, 白底..."      (500 字)</pre>
+  <p>每块独立做 embedding, 检索时只返回最相关的 1-2 块 (top-k), 精准且省 token.</p>
+  <p class="muted">切块大小是经验值: 太大 (整篇) → 检索不准; 太小 (单句) → 上下文不足. 通常 300-800 字一块, 带一定重叠 (overlap) 避免切断语义.</p>
+</div>
+
+<div class="card">
+  <h3>kb_search 作为工具: Agent 自主检索</h3>
+  <p>RAG 不是 "每次对话都检索", 而是作为 <code class="inline">kb_search</code> 工具注册给 Agent. Agent 判断 "这个问题我需要查知识库" 时才调用:</p>
+  <pre>
+用户: "帮我写标题"
+  → Agent: 不需要查知识库, 直接写
+
+用户: "蝦皮标题最多几个字?"
+  → Agent: 调用 kb_search(query="蝦皮標題字數限制", k=3)
+  → 返回: chunk 1 "蝦皮台灣商品標題規範: 最多120字..."
+  → Agent: 回复 "蝦皮标题最多 120 字"</pre>
+  <p class="muted">这就是 RAG + Agent 的威力: <b>检索时机由模型决定</b>, 不是硬编码的 "每次都查". 模型可能判断 "我训练数据里知道这个" 就不查, 或者 "这个我不确定" 就查.</p>
+</div>
 
 <h2 id="m6">10. M6 · Planner-Executor (DAG 规划)</h2>
 <p>M6 把 "走一步看一步" (ReAct) 升级为 <b>"先整体规划, 再分步执行"</b>. 一次 LLM 调用把目标拆成 DAG (有向无环图), 然后按依赖拓扑排序并行执行.</p>
-<div class="card">
-  <h3>关键文件</h3>
-  <ul>
-    <li><code class="inline">internal/agent/planner.go</code> — <code class="inline">Planner.Plan()</code>: LLM → Plan JSON, 解析失败重试</li>
-    <li><code class="inline">internal/agent/executor.go</code> — <code class="inline">Executor.Execute()</code>: DAG 拓扑分层, 同层并行 (并发度 4), 失败 Replan</li>
-    <li><code class="inline">internal/agent/plan_types.go</code> — Plan / Task / TaskStatus / Kahn 环检测 / TopoLevels</li>
-    <li><code class="inline">cmd/plan/</code> — CLI: <code class="inline">-m "目标"</code> 生成 DAG → 执行 → dump JSON</li>
-  </ul>
-</div>
-<pre>
-# 典型 DAG: 调研 → 查商品 → 写文案 → 合规检查 → 组合输出
-t1: kb_search (无依赖)
-t2: product_lookup (无依赖)
-t3: agent:writer (depends: t1, t2)   ← 并行等 t1+t2 完成后执行
-t4: platform_lint (depends: t3)
-t5: agent:composer (depends: t3, t4) ← 最终输出
 
-# /plan 面板: 输入目标 → 生成计划 → 执行计划 (DAG 节点实时变色)
-</pre>
-<p class="muted" style="font-size:13px">上下文裁剪: 每个 agent 子任务只看自己依赖的输出 (<code class="inline">{t1.output}</code>), 不看全局历史, 避免 token 膨胀.</p>
+<div class="card">
+  <h3>为什么 ReAct "走一步看一步" 不够?</h3>
+  <p>ReAct 每一步都只看 "当前状态", 没有全局视野. 这带来两个问题:</p>
+  <ul>
+    <li><b>无法并行</b>: 调研和查商品没有依赖关系, 可以同时做. 但 ReAct 只能串行: 调研 → 等完 → 查商品 → 等完 → 写文案</li>
+    <li><b>上下文膨胀</b>: 每一步都把之前所有 Thought/Observation 带上, 到第 5 步时上下文已经很臃肿</li>
+  </ul>
+  <p>Planner 的思路: 先用一次 LLM 调用 <b>整体规划</b> (生成 DAG), 再按依赖关系 <b>分步执行</b> (同层并行, 上下文裁剪).</p>
+</div>
+
+<div class="card">
+  <h3>DAG (有向无环图) 原理</h3>
+  <p>Plan 本质是一个 DAG — 节点是任务, 边是依赖 ("A 依赖 B" = B 完成后才能做 A):</p>
+  <pre>
+         t1:kb_search    t2:product_lookup      ← 第 0 层 (无依赖, 可并行)
+              \              /
+               \            /
+                v          v
+               t3: agent:writer                ← 第 1 层 (依赖 t1+t2)
+                     |
+                     v
+               t4: platform_lint                ← 第 2 层 (依赖 t3)
+                     |
+                     v
+               t5: agent:composer               ← 第 3 层 (依赖 t3+t4)
+
+  "有向": 依赖关系有方向 (B → A)
+  "无环": 不存在 A→B→A 的循环 (否则永远执行不完)</pre>
+  <p class="muted">环检测用 Kahn 算法: 不断移除入度为 0 的节点. 如果最后还有节点没移除, 说明有环.</p>
+</div>
+
+<div class="card">
+  <h3>拓扑分层: 同层并行执行</h3>
+  <p>把 DAG 按 <b>拓扑层级</b> 分组, 同一层的任务 <b>没有互相依赖</b>, 可以并行执行:</p>
+  <pre>
+Level 0: [t1, t2]     → 并行执行 (goroutine 池, 并发度 4)
+  ↓ 等待全部完成
+Level 1: [t3]         → 执行
+  ↓
+Level 2: [t4]         → 执行
+  ↓
+Level 3: [t5]         → 执行 (最终输出)</pre>
+  <p class="muted">并行的好处: 如果 t1 和 t2 各需 3 秒, 串行要 6 秒, 并行只要 3 秒. 任务越多, 加速越明显.</p>
+</div>
+
+<div class="card">
+  <h3>上下文裁剪: 为什么子任务只看依赖输出?</h3>
+  <p>如果每个子任务都看全局历史, 上下文会指数膨胀. M6 的做法: 每个子任务的 prompt 里 <b>只注入它依赖的任务输出</b>:</p>
+  <pre>
+t3 (agent:writer) 的 prompt:
+  "你是一个文案写手.
+   调研结果: {t1.output}     ← 只有 t1 的输出
+   商品信息: {t2.output}     ← 只有 t2 的输出
+   请根据以上信息写文案."
+
+  // 不包含: system 历史、其他任务的 Thought/Observation
+  // 每个 task 的上下文独立, 不互相污染</pre>
+  <p class="muted">这牺牲了 "全局视野" (子任务不知道其他不依赖的任务做了什么), 但换来上下文可控 + 并行安全.</p>
+</div>
 
 <h2 id="m7">11. M7 · Multi-Agent (4 角色协作)</h2>
-<p>M7 把 "一个 Agent 干所有事" 拆成 <b>4 个有明确边界的角色</b>, 用消息总线协调多轮协作.</p>
-<div class="card">
-  <h3>4 个角色</h3>
-  <ul>
-    <li><b>Researcher</b> (调研员): 收集商品信息与卖点 → <code class="inline">{facts, competitors, summary}</code></li>
-    <li><b>Writer</b> (撰稿人): 根据调研写文案 → <code class="inline">{title, body, tags}</code></li>
-    <li><b>Critic</b> (评审): 检查吸引力与完整性 → <code class="inline">{approve, issues}</code></li>
-    <li><b>Compliance</b> (合规): 检查平台规则 → <code class="inline">{approve, violations}</code></li>
-  </ul>
-</div>
-<div class="card">
-  <h3>关键文件</h3>
-  <ul>
-    <li><code class="inline">internal/agent/bus.go</code> — MessageBus: agent 间消息传递, 持久化到 SQLite</li>
-    <li><code class="inline">internal/agent/roles.go</code> — 4 个角色的 system prompt + 工具子集 + 输出契约</li>
-    <li><code class="inline">internal/agent/multi.go</code> — <code class="inline">MultiAgent.Run()</code>: 多轮协作 + 终止条件 + 循环防御</li>
-    <li><code class="inline">cmd/multi/</code> — CLI: <code class="inline">-m "目标"</code> 启动 4 角色协作</li>
-  </ul>
-</div>
-<pre>
-每轮流程:
-  Researcher → Writer → Critic + Compliance
-                                ↓
-                   都 approve → 完成 ✓
-                   不通过 → 合并 issues+violations → 反馈给下一轮 Writer ↻
+<p>M7 把 "一个 Agent 干所有事" 拆成 <b>4 个有明确边界的角色</b>, 用消息总线协调多轮协作. 这比 M6 的 DAG 更进一步 — 不是 "任务分解", 而是 <b>"角色分工"</b>.</p>
 
-终止条件:
-  1. Critic + Compliance 都 approve → status=ok
-  2. 达到 maxRounds (默认 4) → status=max_rounds
-  3. 循环防御: 连续 2 轮 draft 相似度 > 90% → status=stale (无改进)
-</pre>
-<p>/multi 面板: 4 列消息流 (每列一个角色) + 轮次状态 + 反馈区. 每轮每角色的输出实时显示在对应列.</p>
+<div class="card">
+  <h3>为什么要拆角色?</h3>
+  <p>单个 Agent 做所有事, system prompt 会很长 (又要调研、又要写、又要审), 模型注意力分散, 每个环节都做不好. 拆成 4 个角色后:</p>
+  <ul>
+    <li>每个角色的 system prompt 很短、很聚焦 — Researcher 只管调研, 不操心合规</li>
+    <li>每个角色有不同的 <b>工具子集</b> — Researcher 能查商品, Writer 没有工具 (纯生成)</li>
+    <li>角色间有 <b>输出契约</b> — Researcher 必须输出 <code class="inline">{facts, summary}</code>, Writer 必须输出 <code class="inline">{title, body, tags}</code></li>
+  </ul>
+  <p class="muted">这模拟了人类团队: 调研员不会替文案写手写文案, 写手不会替合规专员检查违禁词. 各司其职, 通过 "消息" 传递结果.</p>
+</div>
+
+<div class="card">
+  <h3>4 个角色的分工设计</h3>
+  <table>
+    <tr><th>角色</th><th>职责</th><th>工具</th><th>输出契约</th><th>审批权</th></tr>
+    <tr><td>Researcher</td><td>调研卖点与竞品</td><td>product_lookup, kb_search</td><td><code class="inline">{facts, competitors, summary}</code></td><td>无</td></tr>
+    <tr><td>Writer</td><td>写文案</td><td>无 (纯生成)</td><td><code class="inline">{title, body, tags}</code></td><td>无</td></tr>
+    <tr><td>Critic</td><td>评审吸引力</td><td>slang_check</td><td><code class="inline">{approve, issues}</code></td><td>有</td></tr>
+    <tr><td>Compliance</td><td>检查合规</td><td>platform_lint</td><td><code class="inline">{approve, violations}</code></td><td>有</td></tr>
+  </table>
+  <p class="muted">关键设计: 只有 Critic 和 Compliance 有 "approve" 权. Writer 不能自己说 "我写得很好" 就结束 — 必须通过评审.</p>
+</div>
+
+<div class="card">
+  <h3>消息总线: Agent 间怎么通信?</h3>
+  <p>4 个角色不是直接调彼此, 而是通过 <b>MessageBus</b> 发消息:</p>
+  <pre>
+// 每轮的消息流
+Coordinator → Researcher:  "收集 towel 的卖点"
+Researcher  → Coordinator: '{"facts":["吸水","蓬鬆"],"summary":"今治毛巾"}'
+Coordinator → Writer:      "根据调研写文案. 调研: 今治毛巾..."
+Writer      → Coordinator: '{"title":"今治毛巾","body":"蓬鬆吸水","tags":["#毛巾"]}'
+Coordinator → Critic:      "评审: {title, body, tags}"
+Critic      → Coordinator: '{"approve":false,"issues":["标题太短"]}'
+Coordinator → Compliance:  "检查合规: {title, body, tags}"
+Compliance  → Coordinator: '{"approve":true,"violations":[]}'</pre>
+  <p class="muted">消息总线持久化到 SQLite, 所以一次完整的协作可以 <b>回放</b> — 这对 M9 的 trace 和 debug 至关重要.</p>
+</div>
+
+<div class="card">
+  <h3>循环防御: bigram Jaccard 相似度</h3>
+  <p>多轮协作有一个陷阱: Critic 说 "标题太短", Writer 改了但改得不够, 下一轮 Critic 还是说 "标题太短", Writer 再改... <b>无限循环</b>. 我们用 <b>文本相似度</b> 检测这种情况:</p>
+  <pre>
+// bigram Jaccard 相似度
+// bigram = 连续 2 个字符的 pair
+
+draft_1 = "今治毛巾 現貨免運"  → bigrams: {今治,治毛,毛巾,巾 , 現,現貨,貨免,免運}
+draft_2 = "今治毛巾 現貨免運好" → bigrams: {今治,治毛,毛巾,巾 , 現,現貨,貨免,免運,運好}
+
+similarity = |交集| / |并集| = 8 / 9 = 0.89
+
+// 如果连续 2 轮相似度 > 0.9 → 判定 "无改进", 强制终止</pre>
+  <p class="muted">为什么用 bigram 而不是字数? 因为 Writer 可能换个说法但内容一样 ("标题太短" → "标题不够长"), bigram 能捕捉这种 "换了字但没换内容" 的情况.</p>
+</div>
 
 <h2 id="m8">12. M8 · Human-in-the-Loop (人工审批)</h2>
-<p>M8 在 Agent 执行高风险动作 (发布商品 / 改库存 / 改价) 前暂停, 把决策权交给人类.</p>
+<p>M8 在 Agent 执行高风险动作 (发布商品 / 改库存 / 改价) 前暂停, 把决策权交给人类. 这不是 "不信任 Agent", 而是 <b>不可逆操作必须有人兜底</b>.</p>
+
 <div class="card">
-  <h3>风险分级 (RiskLevel)</h3>
+  <h3>为什么需要 HITL?</h3>
+  <p>Agent 可能犯三种错:</p>
   <ul>
-    <li><b>low</b> (绿): 可逆操作 (查询/生成文案), 无需审批</li>
-    <li><b>medium</b> (橙): 半可逆操作 (改价), 可选审批</li>
-    <li><b>high</b> (红): 不可逆操作 (发布), 强制审批</li>
+    <li><b>幻觉</b>: 商品不存在但 Agent "查到了", 价格是 0 但 Agent 当真了</li>
+    <li><b>误解</b>: 用户说 "降 20%", Agent 理解成 "降到 20%" — 价格差 5 倍</li>
+    <li><b>合规</b>: Agent 不知道某个词在新规则里被禁了</li>
   </ul>
-  <p>工具可选实现 <code class="inline">RiskLeveler</code> 接口, 未实现时默认 low.</p>
+  <p>对于 <b>可逆操作</b> (查商品、写文案), 错了可以重来. 但对于 <b>不可逆操作</b> (发布、删除), 错了就是事故. HITL 在不可逆操作前插入一个 "人工确认" 节点.</p>
 </div>
+
 <div class="card">
-  <h3>关键文件</h3>
-  <ul>
-    <li><code class="inline">internal/hitl/approval.go</code> — Approval + Manager: Create / Approve / Reject / Edit, 持久化到 SQLite</li>
-    <li><code class="inline">internal/tools/tool.go</code> — <code class="inline">RiskLevel</code> / <code class="inline">RiskLeveler</code> / <code class="inline">GetRiskLevel()</code></li>
-    <li><code class="inline">cmd/hitl/</code> — CLI: <code class="inline">list / show / approve / reject / edit</code></li>
-  </ul>
+  <h3>风险分级: 为什么是三级?</h3>
+  <table>
+    <tr><th>级别</th><th>含义</th><th>典型操作</th><th>审批策略</th></tr>
+    <tr><td><span class="risk-badge risk-low">low</span></td><td>可逆, 零风险</td><td>查询商品、生成文案</td><td>无需审批, 直接执行</td></tr>
+    <tr><td><span class="risk-badge risk-medium">medium</span></td><td>半可逆, 有影响</td><td>修改价格、更新库存</td><td>可选审批 (配置开关)</td></tr>
+    <tr><td><span class="risk-badge risk-high">high</span></td><td>不可逆, 高风险</td><td>发布商品、删除商品</td><td>强制审批, 不批不执行</td></tr>
+  </table>
+  <p class="muted">为什么不是二级 (要/不要)? 因为有些操作 "改了能改回来但会影响订单" (改价), 需要一个中间地带让运营灵活配置.</p>
 </div>
-<pre>
-三种审批决策:
-  approve  → 直接放行, Agent 继续执行
-  reject   → 拒绝, 原因返回给上一步角色
-  edit     → 修改参数后放行, Agent 用 edited_args 继续执行
-</pre>
-<p>/approvals 面板: 待审批表格 (风险徽标颜色) → 点击查看详情 → 批准 / 拒绝 / 修改参数.</p>
+
+<div class="card">
+  <h3>审批状态机</h3>
+  <pre>
+         create
+            ↓
+        ┌─────────┐
+        │ pending │ ← 等待人类决策
+        └────┬────┘
+             │
+    ┌────────┼────────┐
+    ↓        ↓        ↓
+approve   reject    edit
+    │        │        │
+    ↓        ↓        ↓
+approved  rejected  edited
+    │        │        │
+    └────────┴────────┘
+              │
+     Agent 根据决策继续:
+     approved → 用原参数执行
+     rejected → 不执行, 原因返回给上一步
+     edited   → 用修改后的参数执行</pre>
+  <p class="muted">注意: <code class="inline">edited</code> 是 M8 的精髓 — 人类不只说 "行/不行", 还能说 "参数改一下再执行". 这比简单的 approve/reject 灵活得多.</p>
+</div>
 
 <h2 id="m9">13. M9 · 可观测性 + 评测</h2>
-<p>M9 给 Agent 加统一 trace (所有 LLM / 工具 / step 调用可结构化查询), 建立三层评测让 "改了 prompt 比之前更好" 有数据支撑.</p>
-<div class="card">
-  <h3>Trace / Span</h3>
-  <ul>
-    <li><code class="inline">internal/trace/trace.go</code> — Trace (一次 Run) + Span (一次调用), 通过 context.Context 透传</li>
-    <li>Span kind: llm / tool / step / agent, 含 input/output / tokens / error / 耗时</li>
-    <li>持久化到 SQLite (<code class="inline">traces</code> + <code class="inline">spans</code> 表)</li>
-    <li><code class="inline">cmd/trace/</code> — CLI: <code class="inline">list / show / export</code></li>
-  </ul>
-</div>
-<div class="card">
-  <h3>三层评测</h3>
-  <ul>
-    <li><b>LLM-as-Judge</b> (<code class="inline">internal/eval/judge.go</code>): 用 rubric 让 LLM 给输出打 1-5 分</li>
-    <li><b>业务度量</b> (<code class="inline">internal/eval/metrics.go</code>): 黑话命中率 (現貨/免運/CP值...) + 平台合规率 (违禁词检查)</li>
-    <li><b>Runner</b> (<code class="inline">internal/eval/runner.go</code>): 跑固定 prompts → agent 输出 → judge + metrics → markdown 报告</li>
-  </ul>
-</div>
-<pre>
-# 跑评测
-go run ./agent-lab/cmd/eval -suite ecom-v1 -tag baseline
-# → 6 条用例, 输出 markdown 报告 (Judge 均分 / 黑话命中率 / 合规率 / token / 时延)
+<p>M9 解决两个问题: <b>"Agent 到底做了什么?"</b> (可观测性) 和 <b>"改了 prompt, 到底变好还是变坏了?"</b> (评测). 没有 M9, 改 prompt 就是盲改.</p>
 
-# 查 trace
-go run ./agent-lab/cmd/trace list
-go run ./agent-lab/cmd/trace show <trace_id>
-</pre>
-<p>/traces 面板: 左侧 trace 列表 (状态颜色) → 右侧 span 时间线 (llm 蓝 / tool 绿 / step 紫 / agent 橙), input/output 可折叠.</p>
+<div class="card">
+  <h3>可观测性: Trace / Span 模型</h3>
+  <p>借签 OpenTelemetry 的概念: 一次 Agent Run = 一个 <b>Trace</b>, 内部的每次 LLM/工具调用 = 一个 <b>Span</b>:</p>
+  <pre>
+Trace (tr_abc) — "为毛巾写文案"
+├─ Span (sp_1) [llm]     planner.Chat           1.2s  120→80 tokens
+├─ Span (sp_2) [tool]    product_lookup         0.1s  →{"price":299}
+├─ Span (sp_3) [llm]     executor.Chat          2.3s  200→150 tokens
+│   └─ Span (sp_4) [llm] writer.Chat           1.8s  180→120 tokens
+├─ Span (sp_5) [tool]    platform_lint          0.2s  →{"ok":true}
+└─ Span (sp_6) [step]    compose_output         0.0s  →"今治毛巾..."</pre>
+  <p class="muted">每个 Span 记录: kind (llm/tool/step) / input / output / tokens / error / 耗时. 通过 context.Context 透传 trace_id 和 parent span_id, 形成 <b>调用树</b>.</p>
+</div>
+
+<div class="card">
+  <h3>为什么用 context 透传而不是全局变量?</h3>
+  <p>如果用全局变量存 trace_id, 并发时 (M6 的并行执行) 会串 — Trace A 的 span 被记到 Trace B. context 是 <b>请求级别的</b>, 每个 goroutine 有独立的 context 链:</p>
+  <pre>
+// 通过 context 透传
+ctx = WithTraceID(ctx, "tr_abc")       // 注入 trace_id
+ctx = WithSpanID(ctx, "sp_1")          // 注入 parent span_id
+
+// 子 goroutine 继承父 context
+go func(ctx) {
+    span := StartSpan(ctx, "llm")      // 自动从 ctx 取 trace_id + parent
+    // → span.TraceID = "tr_abc" (正确)
+    // → span.ParentID = "sp_1"   (正确)
+}(ctx)</pre>
+</div>
+
+<div class="card">
+  <h3>三层评测: 为什么不只用 LLM-as-Judge?</h3>
+  <p>单一评测维度有盲区. M9 用三层互补:</p>
+  <table>
+    <tr><th>层</th><th>方法</th><th>测什么</th><th>局限</th></tr>
+    <tr><td>LLM-as-Judge</td><td>用另一个 LLM 按 rubric 打 1-5 分</td><td>整体质量 (吸引力/完整性)</td><td>自评偏松, 不同 judge 模型分数不可比</td></tr>
+    <tr><td>业务度量</td><td>规则计算 (黑话命中率/合规率)</td><td>台湾电商特定指标</td><td>只测已知模式, 不能发现新问题</td></tr>
+    <tr><td>成本度量</td><td>token 数 + 时延</td><td>效率 (改 prompt 后变快还是变慢)</td><td>不测质量, 只测资源消耗</td></tr>
+  </table>
+  <p class="muted">三层结合: Judge 说 4 分 (还行), 但业务度量发现黑话命中率只有 20% (不够接地气), token 上涨 50% (变贵了) → 综合判断 "改了 prompt 变差了".</p>
+</div>
+
+<div class="card">
+  <h3>LLM-as-Judge 的原理与局限</h3>
+  <p>用 LLM 评 LLM 的输出, 就像让一个老师批改另一个老师的学生作业. 关键是 <b>rubric</b> (评分细则) 要明确:</p>
+  <pre>
+rubric:
+  1分: 与需求无关, 或包含违禁词
+  3分: 基本可用, 卖点不够突出
+  5分: 卖点突出, 格式完美, 有 CTA
+
+Judge prompt:
+  "按 rubric 给文案打 1-5 分.
+   用户需求: {prompt}
+   文案: {output}
+   输出 JSON: {"score": 1-5, "reason": "..."}"</pre>
+  <p class="muted"><b>局限</b>: 同模型自评偏松 (7B 评 7B 偏高). 更好的做法是用更大模型做 judge (14B 评 7B), 但成本更高. M10 的模型路由可以让 judge 走 14B, 被测走 7B.</p>
+</div>
 
 <h2 id="m10">14. M10 · 模型路由</h2>
 <p>M10 让 Agent 根据任务标签和上下文长度自动选择模型, 简单问题用小模型 (省时延), 复杂任务用大模型 (保质量), 失败时降级.</p>
-<div class="card">
-  <h3>关键文件</h3>
-  <ul>
-    <li><code class="inline">internal/llm/registry.go</code> — ModelEntry + Registry: 模型注册表 (name / base_url / ctx / tags / est_tps)</li>
-    <li><code class="inline">internal/llm/policy.go</code> — RouteRule + Policy: 路由规则 (task 标签 / ctx 超限 / fallback 降级链)</li>
-    <li><code class="inline">internal/llm/router.go</code> — Router: ChatForTask (路由 → 调用 → 失败降级), RouteRecord 历史</li>
-    <li><code class="inline">config/models.json</code> — 3 模型注册表 (3B fast / 7B default / 14B reason) + 8 条路由规则</li>
-    <li><code class="inline">cmd/route/</code> — CLI: <code class="inline">--task title/plan/body</code> 演示路由</li>
-  </ul>
-</div>
-<pre>
-# 路由规则示例
-task=title     → tag:fast   → qwen2.5-3b-instruct   (fallback: 7b)
-task=plan      → tag:reason → qwen2.5-14b-instruct  (fallback: 7b)
-ctx_tokens>6000 → tag:default → qwen2.5-7b-instruct
 
-# 调用方只传 task 标签, 路由内部决定打到哪
-router.ChatForTask(ctx, "title", req)  // → 3b, 失败则 fallback 到 7b
-</pre>
-<p>/router 面板: 模型注册表表格 + 路由规则 + 最近调用记录 (命中模型 / 降级链 / 时延 / 成功状态).</p>
+<div class="card">
+  <h3>为什么要路由? 不全用大模型?</h3>
+  <p>本地部署时, 大模型 (14B) 推理慢 (25 tok/s), 小模型 (3B) 快 (80 tok/s). 如果写一个标题也要用 14B, 用户要等 5 秒; 用 3B 只要 1.5 秒, 质量差异不大.</p>
+  <table>
+    <tr><th>任务</th><th>复杂度</th><th>最佳模型</th><th>原因</th></tr>
+    <tr><td>写标题</td><td>低 (20 字)</td><td>3B (fast)</td><td>够用, 快 3 倍</td></tr>
+    <tr><td>写正文</td><td>中 (200 字)</td><td>7B (default)</td><td>需要连贯性</td></tr>
+    <tr><td>规划 DAG</td><td>高 (推理)</td><td>14B (reason)</td><td>需要复杂推理能力</td></tr>
+    <tr><td>合规检查</td><td>低 (模式匹配)</td><td>3B (fast)</td><td>查违禁词, 不需要推理</td></tr>
+  </table>
+  <p class="muted">路由的本质: <b>把 token 花在刀刃上</b>. 简单任务用小模型省时延, 复杂任务用大模型保质量.</p>
+</div>
+
+<div class="card">
+  <h3>路由策略: 标签 + 上下文 + 降级</h3>
+  <p>路由器用三层策略决定打哪个模型:</p>
+  <pre>
+// 1. 任务标签路由 (最常用)
+task=title      → tag:fast   → 3B模型  (fallback: 7B)
+task=plan       → tag:reason → 14B模型 (fallback: 7B)
+task=body       → tag:default → 7B模型
+
+// 2. 上下文超限路由
+ctx_tokens>6000 → tag:default → 7B模型  (大上下文用大模型)
+
+// 3. 失败降级
+3B 挂了 → fallback 到 7B → 7B 也挂了 → 报错
+                ↑ 记录在 RouteRecord.fallbacks 里</pre>
+  <p class="muted">调用方只传 <code class="inline">task</code> 标签 (如 "title" / "plan" / "body"), 路由内部决定打到哪. 这意味着 <b>agent 代码完全不需要知道有几个模型</b> — 路由器是透明的.</p>
+</div>
+
+<div class="card">
+  <h3>降级机制: 为什么不直接报错?</h3>
+  <p>本地部署时, 某个模型可能因为显存不足、并发冲突等原因暂时不可用. 如果直接报错, 用户体验是 "Agent 挂了". 降级机制让 <b>3B 挂了自动切 7B</b>, 用户无感知:</p>
+  <pre>
+// 降级流程
+primary = 3B  → client.Chat()  → error (模型不可用)
+                                      ↓
+fallback[0] = 7B → client.Chat()  → success! ✓
+                                      ↓
+RouteRecord:
+  chosen = "7B"           // 最终命中的
+  fallbacks = ["3B"]      // 尝试过但失败的
+  success = true</pre>
+  <p class="muted">代价: 降级后可能比预期慢 (7B 比 3B 慢). 但 "慢" 总比 "挂" 好.</p>
+</div>
 
 <h2 id="m11">15. M11 · Capstone (毕业项目)</h2>
-<p>M11 把 M0-M10 的能力组合成完整电商文案 Agent: 一条命令完成多平台文案生成 + 评测.</p>
+<p>M11 把 M0-M10 的能力组合成完整电商文案 Agent: 一条命令完成多平台文案生成 + 评测. 这是整个项目的 <b>集成验收</b> — 如果 M0-M10 有 bug, Capstone 跑不通.</p>
+
 <div class="card">
-  <h3>关键文件</h3>
-  <ul>
-    <li><code class="inline">internal/capstone/pipeline.go</code> — Pipeline.Run: 多平台 Multi-Agent 协作 (M7) → 评测 (M9) → 汇总</li>
-    <li><code class="inline">internal/capstone/persona.go</code> — DefaultPersona + StylePersona (girlfriend/promo/pro/gift)</li>
-    <li><code class="inline">internal/capstone/outputs.go</code> — PlatformOutput + ParseOutput + FormatMarkdown</li>
-    <li><code class="inline">cmd/capstone/</code> — CLI: <code class="inline">--seller --sku-id --platforms --style</code> 一键生成</li>
-  </ul>
+  <h3>流水线编排: M0-M10 能力串联</h3>
+  <pre>
+输入: seller=A001, sku=sku_001, platforms=[shopee, xhs], style=girlfriend
+  │
+  ├─ 对每个 platform:
+  │   │
+  │   ├─ M7: Multi-Agent 协作 (4 角色, 多轮)
+  │   │   ├─ Researcher → 调研卖点 (用 M2 工具 + M5 RAG)
+  │   │   ├─ Writer → 写文案 (用 M4 记忆偏好)
+  │   │   ├─ Critic → 评审 (循环防御防死循环)
+  │   │   └─ Compliance → 合规检查
+  │   │
+  │   └─ M9: 评测
+  │       ├─ LLM-as-Judge → 打 1-5 分
+  │       ├─ 业务度量 → 黑话命中率 + 合规率
+  │       └─ 成本度量 → token + 时延
+  │
+  ├─ M10: 模型路由 (隐式)
+  │   ├─ title 任务 → 3B
+  │   ├─ body 任务 → 7B
+  │   └─ plan 任务 → 14B
+  │
+  └─ 输出: 多平台文案 + 评测分数 + markdown 报告</pre>
 </div>
-<pre>
-# 一条命令跑完整流程
+
+<div class="card">
+  <h3>评测对比: 为什么要有 baseline?</h3>
+  <p>M11 的真正价值不是 "能跑通", 而是 <b>"改了之后能不能量化对比"</b>:</p>
+  <pre>
+# 第一次: baseline
+go run ./agent-lab/cmd/eval -tag baseline
+→ judge=3.2  slang=45%  compliance=80%  tokens=2800
+
+# 改了 system prompt (加入黑话引导)
+
+# 第二次: improved
+go run ./agent-lab/cmd/eval -tag improved
+→ judge=4.1  slang=78%  compliance=100%  tokens=3100
+
+# 结论: 改进有效!
+  judge +0.9 (质量提升)
+  slang +33% (更接地气)
+  compliance +20% (合规提升)
+  tokens +11% (成本略增, 可接受)</pre>
+  <p class="muted">没有 M9 的评测, "改 prompt" 就是凭感觉. 有了评测, 每次改进都有数据支撑 — 这是工程化 Agent 的基础.</p>
+</div>
+
+<div class="card">
+  <h3>风格系统: 4 种文案人格</h3>
+  <p>同一个商品, 不同平台 / 不同目标用户需要不同风格. M11 内置 4 种风格:</p>
+  <table>
+    <tr><th>风格</th><th>语气</th><th>适用场景</th><th>示例</th></tr>
+    <tr><td>girlfriend</td><td>亲切闺蜜, 多 emoji</td><td>小红书种草</td><td>"姐妹们! 这个毛巾真的太好用了~ 🥰"</td></tr>
+    <tr><td>promo</td><td>促销紧迫, 强调限时</td><td>蝦皮限时特卖</td><td>"限時下殺! 現貨免運 最後3小時!"</td></tr>
+    <tr><td>pro</td><td>专业规格, 突出认证</td><td>momo 3C 类目</td><td>"316不鏽鋼 SGS認證 保固一年"</td></tr>
+    <tr><td>gift</td><td>送礼场景, 强调包装</td><td>节日送礼</td><td>"精美禮盒包裝 送禮首選 體面大方"</td></tr>
+  </table>
+  <p class="muted">风格通过 StylePersona() 返回一段补充 prompt, 注入到 Multi-Agent 的 goal 中: "风格: 亲切闺蜜, 多 emoji". Writer 角色会据此调整语气.</p>
+</div>
+
+<div class="card">
+  <h3>工程基线: 用 Capstone 做回归测试</h3>
+  <p>每次改代码 (修 bug / 加功能) 后, 跑一次 Capstone, 确保没有 regression:</p>
+  <pre>
+# CI/CD 中的回归测试
 go run ./agent-lab/cmd/capstone \
   --seller A001 --sku-id sku_001 \
   --platforms shopee,xhs --style girlfriend
 
-# 输出: 多平台文案 + 评测分数 + markdown 报告
---- 蝦皮台湾 ---
-标题: 今治毛巾 現貨免運...
---- 小红书台湾 ---
-#今治毛巾 / 蓬鬆吸水...
-
-[eval] judge=4.4/5  slang=78%  compliance=100%
-</pre>
-<p>/capstone 面板: 参数表单 (seller/sku/platforms/style) + 一键生成 + 评测卡片 (Judge 均分 / 黑话命中 / 合规率 / 轮次 / token) + 多平台输出区.</p>
+# 验收标准:
+# 1. status=ok (不能 fail)
+# 2. compliance_rate=100% (不能有违禁词)
+# 3. judge_score >= 3.0 (不能太差)
+# 4. duration < 60s (不能太慢)</pre>
+  <p class="muted">这就是 "从零手写 Agent" 的终点: 不只是能跑, 而是 <b>可观测、可评测、可回归</b>. 这三个 "可" 是 Agent 工程化的基础.</p>
+</div>
 
 <h2 id="local">16. 本地大模型</h2>
 <p>agent-lab 不绑定任何云端 API。只要它在 <code>OPENAI_BASE_URL</code> 上暴露 Chat Completions 协议，就能接进来. 三种方式:</p>
